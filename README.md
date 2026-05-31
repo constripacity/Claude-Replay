@@ -4,7 +4,7 @@
 
 **Session checkpoint and recovery for Claude Code.**
 
-[![PyPI](https://img.shields.io/pypi/v/claude-replay)](https://pypi.org/project/claude-replay/)
+[![PyPI](https://img.shields.io/pypi/v/claude-replay?cacheSeconds=3600)](https://pypi.org/project/claude-replay/)
 [![CI](https://github.com/constripacity/Claude-Replay/actions/workflows/ci.yml/badge.svg)](https://github.com/constripacity/Claude-Replay/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
