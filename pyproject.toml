@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "claude-replay"
+description = "Session checkpoint and recovery layer for Claude Code — resume interrupted sessions, export shareable HTML traces."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Constripacity" }]
+keywords = ["mcp", "claude-code", "agent", "replay", "checkpoint", "recovery", "session"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Debuggers",
+    "Topic :: Software Development :: Libraries",
+]
+dynamic = ["version"]
+dependencies = [
+    "mcp>=1.0.0",
+    "starlette>=0.27.0",
+    "uvicorn>=0.24.0",
+    "anyio>=4.0",
+]
+
+[project.optional-dependencies]
+tui = [
+    "textual>=0.79.0",
+    "httpx>=0.27.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27.0",
+    "ruff>=0.6",
+    "textual>=0.79.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/constripacity/Claude-Replay"
+Repository = "https://github.com/constripacity/Claude-Replay"
+Issues = "https://github.com/constripacity/Claude-Replay/issues"
+
+[project.scripts]
+claude-replay = "claude_replay.cli:main"
+
+[tool.hatch.version]
+path = "claude_replay/store.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["claude_replay"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/claude_replay",
+    "/tests",
+    "/README.md",
+    "/LICENSE",
+    "/CONTRIBUTING.md",
+    "/CHANGELOG.md",
+    "/CLAUDE.md",
+    "/pyproject.toml",
+    "/pytest.ini",
+]

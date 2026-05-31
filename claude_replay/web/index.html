@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Replay — Dashboard</title>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #11151f; --panel-2: #161b27; --line: #232a3b;
+    --fg: #c5cdd9; --muted: #6b7689; --accent: #5ccfe6; --green: #95e6cb;
+    --yellow: #ffd580; --red: #ff6b7a;
+    --mono: "IBM Plex Mono", "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--mono); font-size: 13px; line-height: 1.5; }
+  header.top { display: flex; align-items: baseline; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header.top h1 { font-size: 15px; margin: 0; letter-spacing: 0.5px; }
+  header.top .meta { color: var(--muted); font-size: 12px; }
+  .live { color: var(--green); }
+  .layout { display: grid; grid-template-columns: 380px 1fr; height: calc(100vh - 49px); }
+  .list { overflow-y: auto; border-right: 1px solid var(--line); }
+  .detail { overflow-y: auto; padding: 20px 24px; }
+  .row { padding: 12px 16px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .row:hover { background: var(--panel-2); }
+  .row.active { background: #10202a; border-left: 3px solid var(--accent); }
+  .row .obj { color: var(--fg); margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .sub { color: var(--muted); font-size: 11px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 3px; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; border: 1px solid var(--line); }
+  .status-running { color: var(--yellow); border-color: var(--yellow); }
+  .status-completed { color: var(--green); border-color: var(--green); }
+  .status-interrupted { color: var(--yellow); border-color: var(--yellow); }
+  .status-error { color: var(--red); border-color: var(--red); }
+  h2 { font-size: 13px; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; margin: 24px 0 10px; }
+  dl.meta { display: grid; grid-template-columns: 130px 1fr; gap: 3px 14px; margin: 0 0 8px; }
+  dl.meta dt { color: var(--muted); }
+  dl.meta dd { margin: 0; word-break: break-word; }
+  .evt { display: grid; grid-template-columns: 48px 80px 1fr; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .evt:nth-child(even) { background: var(--panel-2); }
+  .evt .seq, .evt .ts { color: var(--muted); font-size: 11px; }
+  .evt .tname { color: var(--accent); }
+  .evt-checkpoint { border-left: 3px solid var(--accent); background: #10202a; }
+  .evt-error { border-left: 3px solid var(--red); }
+  pre.preview { margin: 4px 0 0; padding: 6px 8px; background: #0a0d13; border: 1px solid var(--line); border-radius: 3px; white-space: pre-wrap; word-break: break-word; color: var(--muted); font-size: 11px; max-height: 140px; overflow: auto; }
+  .actions { display: flex; gap: 10px; margin: 12px 0 4px; }
+  button { background: var(--panel-2); color: var(--accent); border: 1px solid var(--accent); border-radius: 3px; padding: 5px 14px; font-family: var(--mono); font-size: 12px; cursor: pointer; }
+  button:hover { background: var(--accent); color: var(--bg); }
+  .empty { color: var(--muted); padding: 40px 20px; text-align: center; }
+  .toast { position: fixed; bottom: 20px; right: 20px; background: var(--panel-2); border: 1px solid var(--accent); color: var(--accent); padding: 10px 16px; border-radius: 4px; opacity: 0; transition: opacity .2s; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Claude Replay</h1>
+  <span class="meta" id="meta">connecting…</span>
+  <span class="meta live" id="live"></span>
+</header>
+<div class="layout">
+  <div class="list" id="list"><div class="empty">Loading sessions…</div></div>
+  <div class="detail" id="detail"><div class="empty">Select a session to inspect its timeline.</div></div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+  var state = { sessions: [], active: null };
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+  function toast(msg) {
+    var t = document.getElementById("toast");
+    t.textContent = msg; t.classList.add("show");
+    setTimeout(function () { t.classList.remove("show"); }, 1800);
+  }
+
+  function badge(status) {
+    return '<span class="badge status-' + esc(status) + '">' + esc(status) + "</span>";
+  }
+
+  function renderList() {
+    var el = document.getElementById("list");
+    if (!state.sessions.length) { el.innerHTML = '<div class="empty">No sessions recorded yet.</div>'; return; }
+    el.innerHTML = state.sessions.map(function (s) {
+      var active = s.id === state.active ? " active" : "";
+      return '<div class="row' + active + '" data-id="' + esc(s.id) + '">' +
+        '<div class="obj">' + esc(s.objective || "(no objective)") + "</div>" +
+        '<div class="sub">' + badge(s.status) + "<span>" + esc(s.model || "—") + "</span>" +
+        "<span>" + s.events + " ev</span><span>" + s.checkpoints + " ckpt</span>" +
+        "<span>" + esc(s.id_short) + "</span></div></div>";
+    }).join("");
+    Array.prototype.forEach.call(el.querySelectorAll(".row"), function (row) {
+      row.onclick = function () { select(row.getAttribute("data-id")); };
+    });
+  }
+
+  function select(id) {
+    state.active = id;
+    renderList();
+    fetch("/api/session/" + encodeURIComponent(id)).then(function (r) { return r.json(); }).then(renderDetail);
+  }
+
+  function renderDetail(data) {
+    if (data.error) { document.getElementById("detail").innerHTML = '<div class="empty">' + esc(data.error) + "</div>"; return; }
+    var s = data.session;
+    var meta = [
+      ["Session", s.id], ["Objective", s.objective || "(not recorded)"],
+      ["Status", s.status], ["Model", s.model || "(unknown)"],
+      ["Project", s.project_dir || "—"], ["Started", s.started_at],
+      ["Ended", s.ended_at || "— (running / interrupted)"],
+    ];
+    if (s.error_msg) meta.push(["Error", s.error_msg]);
+    var metaHtml = meta.map(function (kv) { return "<dt>" + esc(kv[0]) + "</dt><dd>" + esc(kv[1]) + "</dd>"; }).join("");
+
+    var items = [];
+    data.events.forEach(function (e) { items.push({ ts: e.timestamp, kind: "event", o: e }); });
+    data.checkpoints.forEach(function (c) { items.push({ ts: c.timestamp, kind: "checkpoint", o: c }); });
+    items.sort(function (a, b) { return a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : (a.kind === "checkpoint") - (b.kind === "checkpoint"); });
+
+    var timeline = items.map(function (it) {
+      var o = it.o;
+      if (it.kind === "checkpoint") {
+        var body = esc(o.step_done || "") + (o.step_next ? "\n→ next: " + esc(o.step_next) : "");
+        return '<div class="evt evt-checkpoint"><span class="seq">cp' + o.seq + '</span><span class="ts">' +
+          esc(o.timestamp) + '</span><div><span class="tname">checkpoint</span><pre class="preview">' + body + "</pre></div></div>";
+      }
+      var name = esc(o.tool_name || o.event_type);
+      var preview = o.tool_input || o.tool_result || o.error_msg || "";
+      var p = preview ? '<pre class="preview">' + esc(String(preview).slice(0, 600)) + "</pre>" : "";
+      return '<div class="evt evt-' + esc(o.event_type) + '"><span class="seq">#' + o.seq + '</span><span class="ts">' +
+        esc(o.timestamp) + '</span><div><span class="tname">' + name + "</span>" + p + "</div></div>";
+    }).join("");
+
+    document.getElementById("detail").innerHTML =
+      "<h2>" + badge(s.status) + "&nbsp; Session detail</h2>" +
+      '<div class="actions"><button onclick="copyBrief(\'' + esc(s.id) + '\')">Copy Resume Brief</button>' +
+      '<button onclick="exportHtml(\'' + esc(s.id) + '\')">Export HTML</button></div>' +
+      '<dl class="meta">' + metaHtml + "</dl>" +
+      "<h2>Timeline</h2>" + (timeline || '<div class="empty">No events.</div>');
+  }
+
+  function copyBrief(id) {
+    fetch("/api/resume/" + encodeURIComponent(id)).then(function (r) { return r.json(); }).then(function (d) {
+      var text = d.brief || "";
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { toast("Resume brief copied"); }, function () { toast("Copy failed"); });
+      } else { toast("Clipboard unavailable"); }
+    });
+  }
+
+  function exportHtml(id) {
+    fetch("/api/export/" + encodeURIComponent(id)).then(function (r) { return r.json(); }).then(function (d) {
+      toast(d.path ? "Exported → " + d.path : (d.error || "Export failed"));
+    });
+  }
+
+  function poll() {
+    fetch("/api/state").then(function (r) { return r.json(); }).then(function (data) {
+      state.sessions = data.sessions || [];
+      document.getElementById("meta").textContent =
+        "v" + data.version + " · " + data.total_sessions + " sessions · up " + data.uptime_human;
+      document.getElementById("live").textContent = "● live";
+      renderList();
+      if (!state.active && state.sessions.length) select(state.sessions[0].id);
+    }).catch(function () { document.getElementById("live").textContent = "● offline"; });
+  }
+
+  poll();
+  setInterval(poll, 2000);
+</script>
+</body>
+</html>

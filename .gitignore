@@ -1,0 +1,33 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+.pytest-tmp/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+*.db
+*.db-wal
+*.db-shm
+
+~/.claude-replay/
+
+.env
+*.pem
+*.key
+
+# Claude Code local (machine-specific) settings — never commit
+.claude/settings.local.json
+
+# Internal planning doc — kept local, not for the public repo
+Claude-Replay-Build-Plan.md
+
+.venv/
+venv/
+env/
