@@ -29,8 +29,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   deletes stale sessions (by last activity) and VACUUMs so the file shrinks.
 - **Death cause in the UI** — the `death_cause`/`death_label` field now renders in
   the dashboard (list badge + detail) and the TUI inspector.
-- **Supply-chain hygiene** — Dependabot (pip + GitHub Actions, weekly) and a
-  CodeQL static-analysis workflow (push/PR + weekly), both SHA-pinned.
+- **Supply-chain hygiene** — Dependabot (pip + GitHub Actions, weekly) to keep
+  dependencies and the SHA-pinned actions current. (CodeQL code scanning runs via
+  GitHub's repo-managed default setup.)
 
 ## [0.1.0] — 2026-05-31
 
