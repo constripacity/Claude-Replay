@@ -4,7 +4,7 @@ All notable changes to Claude Replay are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] — 2026-06-01
 
 ### Added
 
@@ -29,6 +29,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   deletes stale sessions (by last activity) and VACUUMs so the file shrinks.
 - **Death cause in the UI** — the `death_cause`/`death_label` field now renders in
   the dashboard (list badge + detail) and the TUI inspector.
+- **stdio MCP transport** — `claude-replay mcp` serves the seven `replay_*` tools over
+  stdio, so any MCP client can launch Replay directly (`uvx claude-replay mcp`) without
+  the HTTP server. Published to the MCP registry as
+  `io.github.constripacity/claude-replay` (see `server.json`).
 - **Supply-chain hygiene** — Dependabot (pip + GitHub Actions, weekly) to keep
   dependencies and the SHA-pinned actions current. (CodeQL code scanning runs via
   GitHub's repo-managed default setup.)
@@ -60,4 +64,5 @@ five MCP tools, a web dashboard, and a terminal UI read it back.
 - **MCP tools** — `replay_status`, `replay_checkpoint`, `replay_resume`,
   `replay_sessions`, `replay_export`.
 
+[0.2.0]: https://github.com/constripacity/Claude-Replay/releases/tag/v0.2.0
 [0.1.0]: https://github.com/constripacity/Claude-Replay/releases/tag/v0.1.0

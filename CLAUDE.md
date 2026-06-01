@@ -26,7 +26,7 @@ visualize SQLite. Nothing else.
 
 ## CLI subcommands
 install · uninstall · hook <pre-tool|post-tool|stop> · status · sessions ·
-search · resume · export · tag · prune · serve · tui · reset
+search · resume · export · tag · prune · serve · mcp · tui · reset
 
 ## DB location
 ~/.claude-replay/sessions.db (overridable via CLAUDE_REPLAY_DB env var)

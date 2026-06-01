@@ -267,6 +267,14 @@ class TestListTools:
         }
 
 
+# ── stdio transport ───────────────────────────────────────────────────────────
+
+class TestStdioTransport:
+    def test_run_stdio_is_coroutine(self):
+        import inspect
+        assert inspect.iscoroutinefunction(server.run_stdio)
+
+
 # ── /api/search ───────────────────────────────────────────────────────────────
 
 class TestApiSearch:

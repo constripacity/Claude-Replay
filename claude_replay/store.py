@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 # Whether the SQLite build has FTS5. Set during schema setup; search() falls
 # back to a LIKE scan when it's False, so search works on any build.

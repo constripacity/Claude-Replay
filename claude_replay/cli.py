@@ -366,6 +366,17 @@ def cmd_serve(host: str, port: int) -> int:
     return 0
 
 
+def cmd_mcp() -> int:
+    """Serve the MCP tools over stdio (for `uvx claude-replay mcp` / MCP clients).
+    stdout is the JSON-RPC channel — emit nothing else to it."""
+    import anyio
+
+    from . import server
+
+    anyio.run(server.run_stdio)
+    return 0
+
+
 def cmd_tui(url: str) -> int:
     from .tui import ReplayTUI
 
@@ -438,6 +449,8 @@ def main(argv: list[str] | None = None) -> int:
     serve_p.add_argument("--host", default="127.0.0.1", help="Interface to bind (default: 127.0.0.1)")
     serve_p.add_argument("--port", type=int, default=8766, help="Port to listen on (default: 8766)")
 
+    sub.add_parser("mcp", help="Serve the MCP tools over stdio (for `uvx claude-replay mcp`)")
+
     tui_p = sub.add_parser("tui", help="Launch the terminal session browser (needs a running serve)")
     tui_p.add_argument("--url", default="http://127.0.0.1:8766", help="Replay server URL (default: http://127.0.0.1:8766)")
 
@@ -475,6 +488,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_status()
     if args.command == "serve":
         return cmd_serve(args.host, args.port)
+    if args.command == "mcp":
+        return cmd_mcp()
     if args.command == "tui":
         return cmd_tui(args.url)
     if args.command == "reset":

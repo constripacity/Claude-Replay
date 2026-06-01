@@ -109,10 +109,19 @@ claude-replay serve --host 0.0.0.0  # bind all interfaces
 
 ### 4. (Optional) Register the MCP tools with Claude Code
 
-So a running Claude Code session can call `replay_resume`, `replay_checkpoint`, etc. directly:
+So a running Claude Code session can call `replay_resume`, `replay_checkpoint`, etc. directly. Two ways:
+
+**SSE** (alongside the dashboard — needs `claude-replay serve` running):
 
 ```bash
 claude mcp add --transport sse -s user claude-replay http://localhost:8766/sse
+```
+
+**stdio** (no server process — the client launches Replay on demand):
+
+```bash
+claude mcp add -s user claude-replay -- claude-replay mcp
+# or, without installing: uvx claude-replay mcp
 ```
 
 Verify with `claude mcp list`  `claude-replay` should show `✓ Connected`. Inside an already-running session, type `/mcp` to re-handshake.
@@ -170,6 +179,7 @@ Every connected Claude Code session gets these seven tools:
 | `claude-replay tag [session_id] [--name N] [--add a,b] [--remove c] [--clear]` | Name or tag a session |
 | `claude-replay prune [--older-than 30d] [--yes]` | Delete sessions with no recent activity (destructive) |
 | `claude-replay serve [--host H] [--port P]` | Start the MCP + dashboard server (port 8766) |
+| `claude-replay mcp` | Serve the MCP tools over stdio (for `uvx claude-replay mcp` / MCP clients) |
 | `claude-replay tui [--url URL]` | Launch the terminal session browser |
 | `claude-replay reset [--yes]` | Delete **all** recorded sessions (destructive) |
 | `claude-replay hook <pre-tool\|post-tool\|stop>` | Internal — invoked by Claude Code's hooks |

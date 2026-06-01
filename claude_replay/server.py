@@ -2,12 +2,14 @@
 Claude Replay — Starlette app: MCP SSE tools + JSON API + static dashboard.
 
 A thin read/write surface over the SQLite store. All persistence lives in
-store.py; this module exposes it three ways:
-  - Five `replay_*` MCP tools over SSE at /sse (for Claude Code agents)
+store.py; this module exposes it several ways:
+  - Seven `replay_*` MCP tools over SSE at /sse (for Claude Code agents)
+  - The same tools over stdio via run_stdio (for `uvx claude-replay mcp` / any client)
   - A JSON HTTP API under /api/* (for the dashboard or any client)
   - A static dashboard at / (claude_replay/web/index.html)
 
-Run: `claude-replay serve` (port 8766 — Bridge is 8765, deliberately different).
+Run: `claude-replay serve` (port 8766 — Bridge is 8765, deliberately different)
+or `claude-replay mcp` (stdio).
 """
 
 from __future__ import annotations
@@ -427,6 +429,19 @@ async def handle_post_message(scope, receive, send):
         await sse_transport.handle_post_message(scope, receive, send)
     except (anyio.ClosedResourceError, anyio.BrokenResourceError):
         pass
+
+
+# ── MCP stdio transport ───────────────────────────────────────────────────────
+
+async def run_stdio() -> None:
+    """Serve the same MCP tools over stdio, so any MCP client can launch Replay
+    directly (e.g. `uvx claude-replay mcp`) without the HTTP server. stdout is
+    the protocol channel here — nothing else may write to it."""
+    from mcp.server.stdio import stdio_server
+
+    store.db()  # ensure the DB exists before the first tool call
+    async with stdio_server() as (read_stream, write_stream):
+        await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
 # ── App ───────────────────────────────────────────────────────────────────────

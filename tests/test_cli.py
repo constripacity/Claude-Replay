@@ -437,6 +437,26 @@ class TestTagCommand:
         assert cli.main(["tag", "cli-sess-1", "--add", "x"]) == 0
 
 
+class TestMcpCommand:
+    def test_cmd_mcp_runs_stdio(self, fresh_db, monkeypatch):
+        # Replace the blocking stdio server with an async no-op so cmd_mcp
+        # returns cleanly without holding stdin/stdout.
+        import claude_replay.server as server
+
+        called = {}
+
+        async def fake_run_stdio():
+            called["ran"] = True
+
+        monkeypatch.setattr(server, "run_stdio", fake_run_stdio)
+        assert cli.cmd_mcp() == 0
+        assert called.get("ran") is True
+
+    def test_main_mcp_dispatches(self, fresh_db, monkeypatch):
+        monkeypatch.setattr(cli, "cmd_mcp", lambda: 0)
+        assert cli.main(["mcp"]) == 0
+
+
 class TestResetCommand:
     def test_reset_with_yes(self, fresh_db, capsys):
         _seed()

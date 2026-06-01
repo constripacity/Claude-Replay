@@ -1,0 +1,38 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.constripacity/claude-replay",
+  "description": "Session checkpoint and recovery layer for Claude Code — records every session to local SQLite and exposes resume, search, tag, and export tools.",
+  "repository": {
+    "url": "https://github.com/constripacity/Claude-Replay",
+    "source": "github"
+  },
+  "version": "0.2.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "claude-replay",
+      "version": "0.2.0",
+      "runtimeHint": "uvx",
+      "runtimeArguments": [
+        {
+          "type": "positional",
+          "value": "mcp",
+          "valueHint": "mcp"
+        }
+      ],
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "CLAUDE_REPLAY_DB",
+          "description": "SQLite database path (default: ~/.claude-replay/sessions.db). Point HTTP and stdio instances at the same path to share recorded sessions.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}
