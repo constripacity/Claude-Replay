@@ -351,6 +351,92 @@ class TestStatusCommand:
         assert cli.main(["status"]) == 0
 
 
+class TestSearchCommand:
+    def test_no_match(self, fresh_db, capsys):
+        _seed()
+        assert cli.cmd_search("nonexistentxyz", 20) == 0
+        assert "No matches" in capsys.readouterr().out
+
+    def test_match_lists_session(self, fresh_db, capsys):
+        _seed()
+        rc = cli.cmd_search("Read", 20)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "cli-sess-1"[:8] in out
+        assert "match" in out
+
+    def test_main_search(self, fresh_db):
+        _seed()
+        assert cli.main(["search", "thing"]) == 0
+
+
+class TestPruneCommand:
+    def test_parse_age(self):
+        assert cli._parse_age("30d") == 30
+        assert cli._parse_age("4w") == 28
+        assert cli._parse_age("15") == 15
+        assert cli._parse_age("nonsense") is None
+
+    def test_bad_age_returns_error(self, fresh_db, capsys):
+        rc = cli.cmd_prune("banana", assume_yes=True)
+        assert rc == 1
+        assert "could not parse" in capsys.readouterr().err
+
+    def test_prunes_with_yes(self, fresh_db, capsys):
+        store.get_or_create_session("old", objective="x")
+        store.db().execute("UPDATE sessions SET started_at = ? WHERE id = ?",
+                           ("2020-01-01T00:00:00Z", "old"))
+        rc = cli.cmd_prune("30d", assume_yes=True)
+        assert rc == 0
+        assert store.get_session("old") is None
+
+    def test_aborts_without_confirm(self, fresh_db, monkeypatch):
+        _seed()
+        monkeypatch.setattr("builtins.input", lambda _: "no")
+        rc = cli.cmd_prune("0d", assume_yes=False)
+        assert rc == 1
+        assert len(store.list_sessions()) == 1
+
+    def test_main_prune(self, fresh_db):
+        assert cli.main(["prune", "--older-than", "30d", "--yes"]) == 0
+
+
+class TestTagCommand:
+    def test_no_sessions(self, fresh_db, capsys):
+        assert cli.cmd_tag(None, None, None, None, False) == 1
+        assert "No sessions" in capsys.readouterr().out
+
+    def test_unknown_session(self, fresh_db, capsys):
+        _seed()
+        assert cli.cmd_tag("ghost", None, "x", None, False) == 1
+        assert "no session" in capsys.readouterr().err
+
+    def test_add_and_name(self, fresh_db, capsys):
+        _seed()
+        rc = cli.cmd_tag("cli-sess-1", "My run", "bug,auth", None, False)
+        assert rc == 0
+        s = store.get_session("cli-sess-1")
+        assert s["name"] == "My run"
+        assert s["tags"] == ["bug", "auth"]
+
+    def test_remove_and_clear(self, fresh_db):
+        _seed()
+        cli.cmd_tag("cli-sess-1", None, "a,b,c", None, False)
+        cli.cmd_tag("cli-sess-1", None, None, "b", False)
+        assert store.get_session("cli-sess-1")["tags"] == ["a", "c"]
+        cli.cmd_tag("cli-sess-1", None, None, None, True)
+        assert store.get_session("cli-sess-1")["tags"] == []
+
+    def test_defaults_to_latest(self, fresh_db):
+        _seed()
+        assert cli.cmd_tag(None, None, "solo", None, False) == 0
+        assert store.get_session("cli-sess-1")["tags"] == ["solo"]
+
+    def test_main_tag(self, fresh_db):
+        _seed()
+        assert cli.main(["tag", "cli-sess-1", "--add", "x"]) == 0
+
+
 class TestResetCommand:
     def test_reset_with_yes(self, fresh_db, capsys):
         _seed()

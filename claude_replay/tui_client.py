@@ -46,9 +46,24 @@ EVENT_GLYPHS: dict[str, str] = {
 
 DEFAULT_STATUS_COLOR = "#8b949e"
 
+# Death-cause colours — green clean, amber interrupted, red failures.
+DEATH_COLORS: dict[str, str] = {
+    "clean_finish":     "#3fb950",  # green
+    "interrupted":      "#d97706",  # amber
+    "rate_limit":       "#f85149",  # red
+    "context_overflow": "#f85149",  # red
+    "api_error":        "#f85149",  # red
+    "never_started":    "#8b949e",  # grey
+    "unknown":          "#8b949e",  # grey
+}
+
 
 def status_color(status: str | None) -> str:
     return STATUS_COLORS.get((status or "").lower(), DEFAULT_STATUS_COLOR)
+
+
+def death_color(cause: str | None) -> str:
+    return DEATH_COLORS.get((cause or "").lower(), DEFAULT_STATUS_COLOR)
 
 
 def status_glyph(status: str | None) -> str:

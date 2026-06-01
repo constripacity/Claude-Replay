@@ -10,6 +10,7 @@ import argparse
 import copy
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -228,6 +229,8 @@ def cmd_sessions(limit: int) -> int:
         return 0
     print(f"{'ID':10} {'STATUS':12} {'MODEL':20} {'EVENTS':>6} {'CKPTS':>5}  STARTED")
     for s in sessions:
+        tags = "  " + " ".join(f"#{t}" for t in s["tags"]) if s["tags"] else ""
+        name = f"  “{s['name']}”" if s["name"] else ""
         print(
             f"{s['id'][:8]:10} "
             f"{(s['status'] or '—'):12} "
@@ -235,8 +238,81 @@ def cmd_sessions(limit: int) -> int:
             f"{store.count_events(s['id']):>6} "
             f"{store.count_checkpoints(s['id']):>5}  "
             f"{s['started_at'] or '—'}"
+            f"{name}{tags}"
         )
     return 0
+
+
+def cmd_search(query: str, limit: int) -> int:
+    results = store.search(query, limit)
+    if not results:
+        print(f"No matches for: {query}")
+        return 0
+    print(f"{len(results)} session(s) match '{query}':")
+    for r in results:
+        s = r["session"]
+        label = s["name"] or s["objective"] or "(no objective)"
+        tags = " " + " ".join(f"#{t}" for t in s["tags"]) if s["tags"] else ""
+        plural = "es" if r["matches"] != 1 else ""
+        print(f"  {s['id'][:8]}  [{s['status']}]  {r['matches']} match{plural}  {label[:54]}{tags}")
+        if r["snippet"]:
+            print(f"      … {r['snippet']}")
+    return 0
+
+
+def cmd_prune(older_than: str, assume_yes: bool) -> int:
+    days = _parse_age(older_than)
+    if days is None:
+        print(f"error: could not parse age '{older_than}' (try 30d, 4w, or a number of days)",
+              file=sys.stderr)
+        return 1
+    if not assume_yes:
+        try:
+            resp = input(f"Delete sessions with no activity in the last {days} days? Type 'yes': ")
+        except EOFError:
+            resp = ""
+        if resp.strip().lower() != "yes":
+            print("Aborted.")
+            return 1
+    n = store.prune(days)
+    print(f"✓ Pruned {n} session{'s' if n != 1 else ''} older than {days} days.")
+    return 0
+
+
+def cmd_tag(session_id: str | None, name: str | None,
+            add: str | None, remove: str | None, clear: bool) -> int:
+    sid = session_id or _latest_session_id()
+    if sid is None:
+        print("No sessions recorded yet.")
+        return 1
+    if store.get_session(sid) is None:
+        print(f"error: no session with id: {sid}", file=sys.stderr)
+        return 1
+    if name is not None:
+        store.set_name(sid, name)
+    if clear:
+        store.set_tags(sid, [])
+    if add:
+        store.add_tags(sid, _split_csv(add))
+    if remove:
+        store.remove_tags(sid, _split_csv(remove))
+    s = store.get_session(sid)
+    print(f"✓ {sid[:8]}  name: {s['name'] or '—'}  tags: {', '.join(s['tags']) or '—'}")
+    return 0
+
+
+def _split_csv(value: str) -> list[str]:
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def _parse_age(spec: str) -> int | None:
+    """Parse an age like '30d', '4w', or a bare number of days. Returns days."""
+    s = str(spec).strip().lower()
+    m = re.fullmatch(r"(\d+)\s*([dw]?)", s)
+    if not m:
+        return None
+    n = int(m.group(1))
+    return n * 7 if m.group(2) == "w" else n
 
 
 def cmd_status() -> int:
@@ -250,10 +326,14 @@ def cmd_status() -> int:
     s = data["session"]
     death = classify.classify(s, store.list_events(sid))
     print(f"Session:     {s['id']}")
+    if s["name"]:
+        print(f"Name:        {s['name']}")
     print(f"Objective:   {s['objective'] or '(not recorded)'}")
     print(f"Status:      {s['status']}")
     print(f"How it ended: {death['label']}"
           + (f"  ({death['detail']})" if death['detail'] else ""))
+    if s["tags"]:
+        print(f"Tags:        {', '.join(s['tags'])}")
     print(f"Model:       {s['model'] or '(unknown)'}")
     print(f"Project:     {s['project_dir'] or '—'}")
     print(f"Started:     {s['started_at']}")
@@ -336,6 +416,22 @@ def main(argv: list[str] | None = None) -> int:
     sessions_p = sub.add_parser("sessions", help="List recent sessions")
     sessions_p.add_argument("--limit", type=int, default=10, help="How many to show (default: 10)")
 
+    search_p = sub.add_parser("search", help="Full-text search across sessions")
+    search_p.add_argument("query", help="Text to search for (event payloads, objective, name, tags)")
+    search_p.add_argument("--limit", type=int, default=20, help="Max sessions to return (default: 20)")
+
+    prune_p = sub.add_parser("prune", help="Delete sessions older than a cutoff (destructive)")
+    prune_p.add_argument("--older-than", default="30d",
+                         help="Age cutoff: 30d, 4w, or a number of days (default: 30d)")
+    prune_p.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
+
+    tag_p = sub.add_parser("tag", help="Name or tag a session for later retrieval")
+    tag_p.add_argument("session_id", nargs="?", default=None, help="Session ID (default: most recent)")
+    tag_p.add_argument("--name", default=None, help="Set a human-friendly name (empty string clears)")
+    tag_p.add_argument("--add", default=None, help="Comma-separated tags to add")
+    tag_p.add_argument("--remove", default=None, help="Comma-separated tags to remove")
+    tag_p.add_argument("--clear", action="store_true", help="Remove all tags")
+
     sub.add_parser("status", help="Show the current/last session status")
 
     serve_p = sub.add_parser("serve", help="Start the MCP + dashboard server (port 8766)")
@@ -369,6 +465,12 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_export(args.session_id, args.output)
     if args.command == "sessions":
         return cmd_sessions(args.limit)
+    if args.command == "search":
+        return cmd_search(args.query, args.limit)
+    if args.command == "prune":
+        return cmd_prune(args.older_than, args.yes)
+    if args.command == "tag":
+        return cmd_tag(args.session_id, args.name, args.add, args.remove, args.clear)
     if args.command == "status":
         return cmd_status()
     if args.command == "serve":

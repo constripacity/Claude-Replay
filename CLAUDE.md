@@ -3,8 +3,8 @@
 ## What this repo is
 Session checkpoint and recovery layer for Claude Code. Hooks silently into
 every session via Claude Code's hooks system. Stores events + checkpoints in
-SQLite. Exposes 5 MCP tools for recovery and export. Sibling to Claude Bridge
-under Constripacity.
+SQLite. Exposes 7 MCP tools for recovery, search, and export. Sibling to Claude
+Bridge under Constripacity.
 
 ## Architecture in one sentence
 Passive hooks write to SQLite. MCP tools read from SQLite. Dashboard + TUI
@@ -16,7 +16,8 @@ visualize SQLite. Nothing else.
 ## Key files
 - claude_replay/store.py      — all DB access lives here, nowhere else
 - claude_replay/hooks.py      — hook handlers, dispatched by `claude-replay hook <type>`
-- claude_replay/resume.py     — resume brief generation
+- claude_replay/resume.py     — resume brief generation (death cause + live git state)
+- claude_replay/classify.py   — death-cause classification (pure, no DB access)
 - claude_replay/export.py     — HTML trace rendering
 - claude_replay/server.py     — Starlette app (MCP SSE + JSON API + static)
 - claude_replay/tui_client.py — async httpx client over the JSON API (testable, no Textual)
@@ -25,7 +26,7 @@ visualize SQLite. Nothing else.
 
 ## CLI subcommands
 install · uninstall · hook <pre-tool|post-tool|stop> · status · sessions ·
-resume · export · serve · tui · reset
+search · resume · export · tag · prune · serve · tui · reset
 
 ## DB location
 ~/.claude-replay/sessions.db (overridable via CLAUDE_REPLAY_DB env var)

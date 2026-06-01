@@ -479,3 +479,192 @@ class TestTruncation:
         store.insert_event(SESSION_ID, "tool_result", tool_name="Bash", tool_result=big)
         events = store.list_events(SESSION_ID)
         assert "[truncated]" in events[0]["tool_result"]
+
+
+# ── Naming & tagging (v0.2.0) ─────────────────────────────────────────────────
+
+class TestNamingTagging:
+    def test_new_session_has_empty_tags(self, fresh_db):
+        s = make_session()
+        assert s["tags"] == []
+        assert s["name"] is None
+
+    def test_get_session_returns_list_tags(self, fresh_db):
+        make_session()
+        store.set_tags(SESSION_ID, ["bug", "auth"])
+        assert store.get_session(SESSION_ID)["tags"] == ["bug", "auth"]
+
+    def test_set_name(self, fresh_db):
+        make_session()
+        store.set_name(SESSION_ID, "Login refactor")
+        assert store.get_session(SESSION_ID)["name"] == "Login refactor"
+
+    def test_set_name_empty_clears(self, fresh_db):
+        make_session()
+        store.set_name(SESSION_ID, "x")
+        store.set_name(SESSION_ID, "")
+        assert store.get_session(SESSION_ID)["name"] is None
+
+    def test_tags_deduped_case_insensitively(self, fresh_db):
+        make_session()
+        assert store.set_tags(SESSION_ID, ["Bug", "bug", " BUG ", "auth"]) == ["Bug", "auth"]
+
+    def test_add_tags_merges(self, fresh_db):
+        make_session()
+        store.set_tags(SESSION_ID, ["a"])
+        assert store.add_tags(SESSION_ID, ["b", "a"]) == ["a", "b"]
+
+    def test_remove_tags(self, fresh_db):
+        make_session()
+        store.set_tags(SESSION_ID, ["a", "b", "c"])
+        assert store.remove_tags(SESSION_ID, ["B"]) == ["a", "c"]
+
+    def test_empty_tags_stored_as_null(self, fresh_db):
+        make_session()
+        store.set_tags(SESSION_ID, ["a"])
+        store.set_tags(SESSION_ID, [])
+        assert store.get_session(SESSION_ID)["tags"] == []
+
+
+# ── Migration (v0.2.0) ────────────────────────────────────────────────────────
+
+class TestMigration:
+    def test_adds_columns_to_legacy_sessions_table(self, tmp_path, monkeypatch):
+        # Build a 0.1.0-shaped DB by hand (no name/tags columns), then open it.
+        import sqlite3
+
+        db_path = tmp_path / "legacy.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript(
+            """CREATE TABLE sessions (
+                   id TEXT PRIMARY KEY, started_at TEXT NOT NULL, ended_at TEXT,
+                   objective TEXT, project_dir TEXT, model TEXT,
+                   status TEXT NOT NULL DEFAULT 'running', error_msg TEXT);
+               CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   session_id TEXT NOT NULL, seq INTEGER NOT NULL, timestamp TEXT NOT NULL,
+                   event_type TEXT NOT NULL, tool_name TEXT, tool_input TEXT,
+                   tool_result TEXT, error_msg TEXT);
+               CREATE TABLE checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   session_id TEXT NOT NULL, seq INTEGER NOT NULL, timestamp TEXT NOT NULL,
+                   step_done TEXT NOT NULL, step_next TEXT, files_touched TEXT, diff_patch TEXT);
+               INSERT INTO sessions (id, started_at) VALUES ('old', '2026-01-01T00:00:00Z');
+               INSERT INTO events (session_id, seq, timestamp, event_type, tool_name)
+                   VALUES ('old', 1, '2026-01-01T00:00:00Z', 'tool_result', 'LegacyTool');"""
+        )
+        conn.commit()
+        conn.close()
+
+        monkeypatch.setattr(store, "DB_PATH", str(db_path))
+        monkeypatch.setattr(store, "_conn", None)
+        try:
+            # Opening migrates: new columns usable, and the existing event got
+            # backfilled into the FTS index.
+            store.set_tags("old", ["migrated"])
+            assert store.get_session("old")["tags"] == ["migrated"]
+            assert any(h["session"]["id"] == "old" for h in store.search("LegacyTool"))
+        finally:
+            store.close()
+            monkeypatch.setattr(store, "_conn", None)
+
+
+# ── Full-text search (v0.2.0) ─────────────────────────────────────────────────
+
+class TestSearch:
+    def _seed(self):
+        make_session(SESSION_ID, objective="Fix the login bug")
+        store.insert_event(SESSION_ID, "tool_result", tool_name="Edit",
+                           tool_input={"file_path": "auth/login.py"})
+        store.insert_event(SESSION_ID, "tool_result", tool_name="Bash",
+                           tool_result={"stdout": "ran the migration script"})
+        make_session(SESSION_ID_2, objective="Write docs")
+        store.insert_event(SESSION_ID_2, "tool_result", tool_name="Write",
+                           tool_input={"file_path": "README.md"})
+
+    def test_empty_query_returns_nothing(self, fresh_db):
+        self._seed()
+        assert store.search("") == []
+        assert store.search("   ") == []
+
+    def test_matches_event_payload(self, fresh_db):
+        self._seed()
+        hits = store.search("login")
+        ids = [h["session"]["id"] for h in hits]
+        assert SESSION_ID in ids
+        assert SESSION_ID_2 not in ids
+
+    def test_matches_objective(self, fresh_db):
+        self._seed()
+        ids = [h["session"]["id"] for h in store.search("docs")]
+        assert SESSION_ID_2 in ids
+
+    def test_matches_tag(self, fresh_db):
+        self._seed()
+        store.set_tags(SESSION_ID_2, ["release"])
+        ids = [h["session"]["id"] for h in store.search("release")]
+        assert SESSION_ID_2 in ids
+
+    def test_ranks_by_match_count(self, fresh_db):
+        make_session(SESSION_ID, objective="x")
+        for _ in range(3):
+            store.insert_event(SESSION_ID, "tool_result", tool_name="Bash",
+                               tool_result={"stdout": "widget widget"})
+        make_session(SESSION_ID_2, objective="x")
+        store.insert_event(SESSION_ID_2, "tool_result", tool_name="Bash",
+                           tool_result={"stdout": "widget"})
+        hits = store.search("widget")
+        assert hits[0]["session"]["id"] == SESSION_ID
+        assert hits[0]["matches"] >= hits[-1]["matches"]
+
+    def test_fts_special_chars_dont_crash(self, fresh_db):
+        self._seed()
+        # Quotes / parens would be FTS5 operators if unescaped.
+        assert isinstance(store.search('login("bug")'), list)
+
+    def test_deleted_events_leave_fts(self, fresh_db):
+        self._seed()
+        assert store.search("login")
+        store.reset_all()
+        assert store.search("login") == []
+
+
+# ── Retention / prune (v0.2.0) ────────────────────────────────────────────────
+
+class TestPrune:
+    def _dated_session(self, sid, started, ended=None):
+        store.get_or_create_session(sid, objective="x")
+        store.db().execute(
+            "UPDATE sessions SET started_at = ?, ended_at = ? WHERE id = ?",
+            (started, ended, sid),
+        )
+
+    def test_prunes_old_keeps_recent(self, fresh_db):
+        self._dated_session("old", "2020-01-01T00:00:00Z")
+        store.insert_event("old", "tool_result", tool_name="Read")
+        store.write_checkpoint("old", step_done="done")
+        self._dated_session("fresh", "2026-05-31T00:00:00Z")
+
+        removed = store.prune(older_than_days=30)
+
+        assert removed == 1
+        assert store.get_session("old") is None
+        assert store.get_session("fresh") is not None
+        assert store.list_events("old") == []
+        assert store.list_checkpoints("old") == []
+
+    def test_uses_ended_at_when_present(self, fresh_db):
+        # Started long ago but ENDED recently → must be kept.
+        self._dated_session("longrun", "2020-01-01T00:00:00Z", "2026-05-31T00:00:00Z")
+        assert store.prune(older_than_days=30) == 0
+        assert store.get_session("longrun") is not None
+
+    def test_negative_days_rejected(self, fresh_db):
+        import pytest
+        with pytest.raises(ValueError):
+            store.prune(older_than_days=-1)
+
+    def test_prune_keeps_fts_consistent(self, fresh_db):
+        self._dated_session("old", "2020-01-01T00:00:00Z")
+        store.insert_event("old", "tool_result", tool_name="Bash",
+                           tool_result={"stdout": "findme"})
+        store.prune(older_than_days=30, vacuum=False)
+        assert store.search("findme") == []

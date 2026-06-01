@@ -45,6 +45,7 @@ from textual.widgets import (
 from .tui_client import (
     ReplayClient,
     ReplayError,
+    death_color,
     event_color,
     event_glyph,
     short_id,
@@ -188,13 +189,21 @@ class Inspector(VerticalScroll):
 
         self.mount(Label("[bold #e6edf3]SESSION[/]"))
         self.mount(Static(f"[#6e7681]id        [/] [#e6edf3]{s.get('id', '—')}[/]"))
+        if s.get("name"):
+            self.mount(Static(f"[#6e7681]name      [/] [#58a6ff]{s['name']}[/]"))
         self.mount(Static(f"[#6e7681]status    [/] [bold {scolor}]{s.get('status', '—')}[/]"))
+        if s.get("death_label"):
+            self.mount(Static(f"[#6e7681]ended     [/] [{death_color(s.get('death_cause'))}]{s['death_label']}[/]"))
         self.mount(Static(f"[#6e7681]model     [/] [#e6edf3]{s.get('model') or '—'}[/]"))
         self.mount(Static(f"[#6e7681]project   [/] [#7dd3fc]{s.get('project_dir') or '—'}[/]"))
         self.mount(Static(f"[#6e7681]started   [/] [#e6edf3]{s.get('started_at') or '—'}[/]"))
-        self.mount(Static(f"[#6e7681]ended     [/] [#e6edf3]{s.get('ended_at') or '— (running)'}[/]"))
+        self.mount(Static(f"[#6e7681]ended at  [/] [#e6edf3]{s.get('ended_at') or '— (running)'}[/]"))
         self.mount(Static(f"[#6e7681]events    [/] [#e6edf3]{len(events)}[/]"))
         self.mount(Static(f"[#6e7681]ckpts     [/] [#bc8cff]{len(checkpoints)}[/]"))
+        tags = s.get("tags") or []
+        if tags:
+            chips = "  ".join(f"[#7dd3fc]#{t}[/]" for t in tags)
+            self.mount(Static(f"[#6e7681]tags      [/] {chips}"))
         self.mount(Static(""))
         self.mount(Label("[bold #e6edf3]OBJECTIVE[/]"))
         self.mount(Static(Text(s.get("objective") or "(not recorded)", style="#e6edf3")))

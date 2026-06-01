@@ -30,6 +30,17 @@
   .status-completed { color: var(--green); border-color: var(--green); }
   .status-interrupted { color: var(--yellow); border-color: var(--yellow); }
   .status-error { color: var(--red); border-color: var(--red); }
+  .death-clean_finish { color: var(--green); border-color: var(--green); }
+  .death-interrupted { color: var(--yellow); border-color: var(--yellow); }
+  .death-rate_limit, .death-context_overflow, .death-api_error { color: var(--red); border-color: var(--red); }
+  .death-never_started, .death-unknown { color: var(--muted); border-color: var(--line); }
+  .tag { display: inline-block; padding: 0 6px; border-radius: 3px; font-size: 10px; color: var(--accent); border: 1px solid var(--line); background: #0a0d13; }
+  .name { color: var(--accent); }
+  .search { margin-left: auto; }
+  .search input { background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 3px; padding: 4px 10px; font-family: var(--mono); font-size: 12px; width: 220px; }
+  .search input:focus { outline: none; border-color: var(--accent); }
+  .matchcount { color: var(--green); }
+  pre.snippet { margin: 4px 0 0; padding: 4px 8px; background: #0a0d13; border: 1px solid var(--line); border-radius: 3px; white-space: pre-wrap; word-break: break-word; color: var(--muted); font-size: 11px; }
   h2 { font-size: 13px; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; margin: 24px 0 10px; }
   dl.meta { display: grid; grid-template-columns: 130px 1fr; gap: 3px 14px; margin: 0 0 8px; }
   dl.meta dt { color: var(--muted); }
@@ -54,6 +65,7 @@
   <h1>Claude Replay</h1>
   <span class="meta" id="meta">connecting…</span>
   <span class="meta live" id="live"></span>
+  <span class="search"><input id="q" type="search" placeholder="search sessions…" autocomplete="off"></span>
 </header>
 <div class="layout">
   <div class="list" id="list"><div class="empty">Loading sessions…</div></div>
@@ -61,7 +73,7 @@
 </div>
 <div class="toast" id="toast"></div>
 <script>
-  var state = { sessions: [], active: null };
+  var state = { sessions: [], active: null, query: "", results: [] };
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
@@ -77,20 +89,63 @@
   function badge(status) {
     return '<span class="badge status-' + esc(status) + '">' + esc(status) + "</span>";
   }
+  function deathBadge(s) {
+    if (!s.death_label) return "";
+    // Skip the redundant "Clean finish" on already-completed sessions.
+    if (s.death_cause === "clean_finish" && s.status === "completed") return "";
+    return '<span class="badge death-' + esc(s.death_cause) + '">' + esc(s.death_label) + "</span>";
+  }
+  function tagsHtml(s) {
+    if (!s.tags || !s.tags.length) return "";
+    return s.tags.map(function (t) { return '<span class="tag">' + esc(t) + "</span>"; }).join(" ");
+  }
+  function rowTitle(s) {
+    return s.name
+      ? '<span class="name">' + esc(s.name) + "</span>"
+      : esc(s.objective || "(no objective)");
+  }
+
+  function sessionRow(s, extra) {
+    var active = s.id === state.active ? " active" : "";
+    return '<div class="row' + active + '" data-id="' + esc(s.id) + '">' +
+      '<div class="obj">' + rowTitle(s) + "</div>" +
+      '<div class="sub">' + badge(s.status) + deathBadge(s) +
+      "<span>" + esc(s.model || "—") + "</span>" +
+      "<span>" + s.events + " ev</span><span>" + s.checkpoints + " ckpt</span>" +
+      "<span>" + esc(s.id_short) + "</span>" + tagsHtml(s) + "</div>" +
+      (extra || "") + "</div>";
+  }
+
+  function bindRows(el) {
+    Array.prototype.forEach.call(el.querySelectorAll(".row"), function (row) {
+      row.onclick = function () { select(row.getAttribute("data-id")); };
+    });
+  }
 
   function renderList() {
     var el = document.getElementById("list");
+    if (state.query) {
+      if (!state.results.length) { el.innerHTML = '<div class="empty">No matches for “' + esc(state.query) + '”.</div>'; return; }
+      el.innerHTML = state.results.map(function (r) {
+        var snip = r.snippet ? '<pre class="snippet">' + esc(r.snippet) + "</pre>" : "";
+        var count = '<span class="matchcount">' + r.matches + ' match' + (r.matches === 1 ? "" : "es") + "</span>";
+        return sessionRow(r.session, '<div class="sub">' + count + "</div>" + snip);
+      }).join("");
+      bindRows(el);
+      return;
+    }
     if (!state.sessions.length) { el.innerHTML = '<div class="empty">No sessions recorded yet.</div>'; return; }
-    el.innerHTML = state.sessions.map(function (s) {
-      var active = s.id === state.active ? " active" : "";
-      return '<div class="row' + active + '" data-id="' + esc(s.id) + '">' +
-        '<div class="obj">' + esc(s.objective || "(no objective)") + "</div>" +
-        '<div class="sub">' + badge(s.status) + "<span>" + esc(s.model || "—") + "</span>" +
-        "<span>" + s.events + " ev</span><span>" + s.checkpoints + " ckpt</span>" +
-        "<span>" + esc(s.id_short) + "</span></div></div>";
-    }).join("");
-    Array.prototype.forEach.call(el.querySelectorAll(".row"), function (row) {
-      row.onclick = function () { select(row.getAttribute("data-id")); };
+    el.innerHTML = state.sessions.map(function (s) { return sessionRow(s); }).join("");
+    bindRows(el);
+  }
+
+  function doSearch(q) {
+    state.query = q;
+    if (!q) { renderList(); return; }
+    fetch("/api/search?q=" + encodeURIComponent(q)).then(function (r) { return r.json(); }).then(function (d) {
+      if (state.query !== q) return;  // a newer keystroke already superseded this
+      state.results = d.results || [];
+      renderList();
     });
   }
 
@@ -103,12 +158,21 @@
   function renderDetail(data) {
     if (data.error) { document.getElementById("detail").innerHTML = '<div class="empty">' + esc(data.error) + "</div>"; return; }
     var s = data.session;
+    var summary = (state.sessions.concat(state.results.map(function (r) { return r.session; }))
+      ).filter(function (x) { return x.id === s.id; })[0] || {};
     var meta = [
-      ["Session", s.id], ["Objective", s.objective || "(not recorded)"],
-      ["Status", s.status], ["Model", s.model || "(unknown)"],
-      ["Project", s.project_dir || "—"], ["Started", s.started_at],
-      ["Ended", s.ended_at || "— (running / interrupted)"],
+      ["Session", s.id],
     ];
+    if (summary.name) meta.push(["Name", summary.name]);
+    meta.push(
+      ["Objective", s.objective || "(not recorded)"],
+      ["Status", s.status],
+      ["How it ended", summary.death_label || "—"],
+      ["Model", s.model || "(unknown)"],
+      ["Project", s.project_dir || "—"], ["Started", s.started_at],
+      ["Ended", s.ended_at || "— (running / interrupted)"]
+    );
+    if (summary.tags && summary.tags.length) meta.push(["Tags", summary.tags.join(", ")]);
     if (s.error_msg) meta.push(["Error", s.error_msg]);
     var metaHtml = meta.map(function (kv) { return "<dt>" + esc(kv[0]) + "</dt><dd>" + esc(kv[1]) + "</dd>"; }).join("");
 
@@ -160,10 +224,18 @@
       document.getElementById("meta").textContent =
         "v" + data.version + " · " + data.total_sessions + " sessions · up " + data.uptime_human;
       document.getElementById("live").textContent = "● live";
-      renderList();
+      if (!state.query) renderList();  // don't clobber an active search
       if (!state.active && state.sessions.length) select(state.sessions[0].id);
     }).catch(function () { document.getElementById("live").textContent = "● offline"; });
   }
+
+  var qInput = document.getElementById("q");
+  var qTimer = null;
+  qInput.addEventListener("input", function () {
+    var v = qInput.value.trim();
+    if (qTimer) clearTimeout(qTimer);
+    qTimer = setTimeout(function () { doSearch(v); }, 180);
+  });
 
   poll();
   setInterval(poll, 2000);

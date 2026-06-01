@@ -227,14 +227,65 @@ class TestDispatchTool:
         out = await server.dispatch_tool("bogus", {})
         assert "Unknown tool" in out[0].text
 
+    async def test_search_match(self, fresh_db):
+        seed("srv-sess-1")
+        out = await server.dispatch_tool("replay_search", {"query": "Write"})
+        assert "srv-sess" in out[0].text
+
+    async def test_search_no_match(self, fresh_db):
+        seed()
+        out = await server.dispatch_tool("replay_search", {"query": "zzzznope"})
+        assert "No matches" in out[0].text
+
+    async def test_search_empty_query(self, fresh_db):
+        out = await server.dispatch_tool("replay_search", {"query": "  "})
+        assert "non-empty" in out[0].text
+
+    async def test_tag_sets_name_and_tags(self, fresh_db):
+        seed("srv-sess-1")
+        out = await server.dispatch_tool(
+            "replay_tag", {"session_id": "srv-sess-1", "name": "Run A", "add": ["bug"]}
+        )
+        assert "Run A" in out[0].text
+        s = store.get_session("srv-sess-1")
+        assert s["name"] == "Run A" and s["tags"] == ["bug"]
+
+    async def test_tag_unknown_session(self, fresh_db):
+        out = await server.dispatch_tool("replay_tag", {"session_id": "ghost", "add": ["x"]})
+        assert "no session" in out[0].text
+
 
 # ── list_tools ────────────────────────────────────────────────────────────────
 
 class TestListTools:
-    async def test_five_tools(self, fresh_db):
+    async def test_seven_tools(self, fresh_db):
         tools = await server.list_tools()
         names = {t.name for t in tools}
-        assert names == {"replay_status", "replay_checkpoint", "replay_resume", "replay_sessions", "replay_export"}
+        assert names == {
+            "replay_status", "replay_checkpoint", "replay_resume", "replay_sessions",
+            "replay_export", "replay_search", "replay_tag",
+        }
+
+
+# ── /api/search ───────────────────────────────────────────────────────────────
+
+class TestApiSearch:
+    def test_match(self, client):
+        seed("s1")
+        d = client.get("/api/search", params={"q": "Write"}).json()
+        assert d["count"] >= 1
+        assert any(r["session"]["id"] == "s1" for r in d["results"])
+
+    def test_empty_query(self, client):
+        d = client.get("/api/search", params={"q": ""}).json()
+        assert d["count"] == 0
+        assert d["results"] == []
+
+    def test_summary_has_tags(self, client):
+        seed("s1")
+        store.set_tags("s1", ["release"])
+        d = client.get("/api/search", params={"q": "release"}).json()
+        assert d["results"][0]["session"]["tags"] == ["release"]
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

@@ -17,6 +17,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ended (with the last error, when known) and a **live repository-state** section:
   the current branch and uncommitted-file list, read from the project dir at
   brief time so the restart reflects the tree you're actually resuming into.
+- **Full-text search** (`store.search`) — FTS5 index over event payloads (with a
+  LIKE fallback on builds without FTS5), also matching objective / name / tags.
+  Surfaced as `claude-replay search <query>`, a `replay_search` MCP tool, an
+  `/api/search` endpoint, and a live search box in the dashboard.
+- **Session naming & tagging** — name a session and add/remove tags via
+  `claude-replay tag`, the `replay_tag` MCP tool, or the JSON API; shown in
+  `sessions` / `status`, the dashboard, and the TUI. New `name`/`tags` columns,
+  migrated onto existing 0.1.0 databases automatically.
+- **Retention & pruning** (`store.prune`) — `claude-replay prune --older-than 30d`
+  deletes stale sessions (by last activity) and VACUUMs so the file shrinks.
+- **Death cause in the UI** — the `death_cause`/`death_label` field now renders in
+  the dashboard (list badge + detail) and the TUI inspector.
 - **Supply-chain hygiene** — Dependabot (pip + GitHub Actions, weekly) and a
   CodeQL static-analysis workflow (push/PR + weekly), both SHA-pinned.
 

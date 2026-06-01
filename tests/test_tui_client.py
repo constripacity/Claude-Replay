@@ -17,6 +17,7 @@ from claude_replay.tui_client import (
     STATUS_COLORS,
     ReplayClient,
     ReplayError,
+    death_color,
     event_color,
     event_glyph,
     short_id,
@@ -40,6 +41,13 @@ def test_status_color_is_case_insensitive():
 def test_status_color_unknown_falls_back():
     assert status_color("weird") == "#8b949e"
     assert status_color(None) == "#8b949e"
+
+
+def test_death_color():
+    assert death_color("clean_finish") == "#3fb950"
+    assert death_color("api_error") == "#f85149"
+    assert death_color("CLEAN_FINISH") == death_color("clean_finish")
+    assert death_color(None) == "#8b949e"
 
 
 def test_status_glyph():

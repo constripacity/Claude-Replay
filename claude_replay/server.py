@@ -106,6 +106,8 @@ def _session_summary(s: dict[str, Any]) -> dict[str, Any]:
         "id": s["id"],
         "id_short": s["id"][:8],
         "objective": s["objective"],
+        "name": s.get("name"),
+        "tags": s.get("tags", []),
         "status": s["status"],
         "death_cause": death["cause"],
         "death_label": death["label"],
@@ -173,6 +175,37 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "session_id": {"type": "string", "description": "Session ID (default: most recent)"},
                     "output": {"type": "string", "description": "Output directory (default: ~/.claude-replay/exports)"},
+                },
+            },
+        ),
+        Tool(
+            name="replay_search",
+            description=(
+                "Full-text search across recorded sessions (event payloads, objective, "
+                "name, and tags). Returns matching sessions ranked by match count."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Text to search for"},
+                    "limit": {"type": "integer", "description": "Max sessions (default: 20)", "default": 20},
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="replay_tag",
+            description=(
+                "Name or tag a session for later retrieval. Sets a name and/or adds/removes "
+                "tags on a session (default: the most recent)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Session ID (default: most recent)"},
+                    "name": {"type": "string", "description": "Human-friendly name"},
+                    "add": {"type": "array", "items": {"type": "string"}, "description": "Tags to add"},
+                    "remove": {"type": "array", "items": {"type": "string"}, "description": "Tags to remove"},
                 },
             },
         ),
@@ -244,6 +277,38 @@ async def dispatch_tool(name: str, arguments: dict[str, Any]) -> list[TextConten
             return [TextContent(type="text", text=f"error: {e}")]
         return [TextContent(type="text", text=f"✓ Exported trace → {path}")]
 
+    if name == "replay_search":
+        query = str(arguments.get("query") or "").strip()
+        if not query:
+            return [TextContent(type="text", text="Provide a non-empty query.")]
+        results = store.search(query, int(arguments.get("limit", 20)))
+        if not results:
+            return [TextContent(type="text", text=f"No matches for: {query}")]
+        lines = [f"{len(results)} session(s) match '{query}':"]
+        for r in results:
+            s = r["session"]
+            label = s["name"] or s["objective"] or "(no objective)"
+            lines.append(f"  • {s['id'][:8]}  [{s['status']}]  {r['matches']} match  {label[:60]}")
+            if r["snippet"]:
+                lines.append(f"      … {r['snippet']}")
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    if name == "replay_tag":
+        sid = arguments.get("session_id") or _latest_session_id()
+        if sid is None:
+            return [TextContent(type="text", text="No sessions recorded yet.")]
+        if store.get_session(sid) is None:
+            return [TextContent(type="text", text=f"error: no session with id: {sid}")]
+        if arguments.get("name") is not None:
+            store.set_name(sid, str(arguments["name"]))
+        if arguments.get("add"):
+            store.add_tags(sid, [str(t) for t in arguments["add"]])
+        if arguments.get("remove"):
+            store.remove_tags(sid, [str(t) for t in arguments["remove"]])
+        s = store.get_session(sid)
+        tags = ", ".join(s["tags"]) or "—"
+        return [TextContent(type="text", text=f"✓ {sid[:8]}  name: {s['name'] or '—'}  tags: {tags}")]
+
     return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
 
@@ -279,14 +344,37 @@ async def api_state(request: Request) -> JSONResponse:
 
 
 async def api_session(request: Request) -> JSONResponse:
+    from . import classify
+
     sid = request.path_params["session_id"]
     session = store.get_session(sid)
     if session is None:
         return JSONResponse({"error": "not found"}, status_code=404)
+    events = store.list_events(sid)
+    death = classify.classify(session, events)
+    session = {**session, "death_cause": death["cause"], "death_label": death["label"]}
     return JSONResponse({
         "session": session,
-        "events": store.list_events(sid),
+        "events": events,
         "checkpoints": store.list_checkpoints(sid),
+    })
+
+
+async def api_search(request: Request) -> JSONResponse:
+    query = request.query_params.get("q", "").strip()
+    try:
+        limit = int(request.query_params.get("limit", 20))
+    except (TypeError, ValueError):
+        limit = 20
+    results = store.search(query, limit) if query else []
+    return JSONResponse({
+        "query": query,
+        "count": len(results),
+        "results": [
+            {"session": _session_summary(r["session"]),
+             "matches": r["matches"], "snippet": r["snippet"]}
+            for r in results
+        ],
     })
 
 
@@ -346,6 +434,7 @@ async def handle_post_message(scope, receive, send):
 _routes = [
     Route("/status", endpoint=http_status),
     Route("/api/state", endpoint=api_state),
+    Route("/api/search", endpoint=api_search),
     Route("/api/session/{session_id}", endpoint=api_session),
     Route("/api/resume/{session_id}", endpoint=api_resume),
     Route("/api/export/{session_id}", endpoint=api_export),

@@ -142,15 +142,17 @@ Paste the `resume` output into a fresh Claude Code session and it picks up where
 
 ## MCP Tools
 
-Every connected Claude Code session gets these five tools:
+Every connected Claude Code session gets these seven tools:
 
 | Tool | Description |
 |------|-------------|
-| `replay_status` | Current session summary  objective, status, event/checkpoint counts, last activity |
+| `replay_status` | Current session summary  objective, status, how it ended, event/checkpoint counts, last activity |
 | `replay_checkpoint` | Force a checkpoint of the current session now, with an optional note |
 | `replay_resume` | Generate a structured resume brief for a session (default: most recent) |
 | `replay_sessions` | List recent sessions with status, model, duration, checkpoint count |
 | `replay_export` | Render a session as a self-contained HTML trace and return the path |
+| `replay_search` | Full-text search across sessions (event payloads, objective, name, tags), ranked by match count |
+| `replay_tag` | Name a session and add/remove tags for later retrieval |
 
 ---
 
@@ -161,9 +163,12 @@ Every connected Claude Code session gets these five tools:
 | `claude-replay install` | Merge Replay's hooks into `~/.claude/settings.json` (idempotent) |
 | `claude-replay uninstall` | Remove only Replay's hooks |
 | `claude-replay status` | Show the current/last session at a glance |
-| `claude-replay sessions [--limit N]` | List recent sessions |
+| `claude-replay sessions [--limit N]` | List recent sessions (with names + tags) |
+| `claude-replay search <query> [--limit N]` | Full-text search across sessions, ranked by match count |
 | `claude-replay resume [session_id]` | Print a resume brief (default: most recent) |
 | `claude-replay export [session_id] [--output DIR]` | Render an HTML trace |
+| `claude-replay tag [session_id] [--name N] [--add a,b] [--remove c] [--clear]` | Name or tag a session |
+| `claude-replay prune [--older-than 30d] [--yes]` | Delete sessions with no recent activity (destructive) |
 | `claude-replay serve [--host H] [--port P]` | Start the MCP + dashboard server (port 8766) |
 | `claude-replay tui [--url URL]` | Launch the terminal session browser |
 | `claude-replay reset [--yes]` | Delete **all** recorded sessions (destructive) |
@@ -173,9 +178,9 @@ Every connected Claude Code session gets these five tools:
 
 ## Dashboard & TUI
 
-**Web dashboard** (`claude-replay serve`, then open `http://localhost:8766/`)  a vanilla-JS view that polls every 2 s: session list, per-session timeline, and one-click "Copy Resume Brief" / "Export HTML". No CDN, no build step.
+**Web dashboard** (`claude-replay serve`, then open `http://localhost:8766/`)  a vanilla-JS view that polls every 2 s: session list (with how-it-ended badge + tags), a live search box, per-session timeline, and one-click "Copy Resume Brief" / "Export HTML". No CDN, no build step.
 
-**Terminal UI** (`claude-replay tui`)  a Textual browser in the same dark theme. A session sidebar, a live event feed, and a detail inspector showing the latest checkpoint and files touched. Keys:
+**Terminal UI** (`claude-replay tui`)  a Textual browser in the same dark theme. A session sidebar, a live event feed, and a detail inspector showing how the session ended, its tags, the latest checkpoint, and files touched. Keys:
 
 ```
 ↑↓ navigate   Tab switch panel   Space pause
