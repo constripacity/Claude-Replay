@@ -9,17 +9,34 @@ claude_replay/web/trace.html; this module fills it with rendered markup.
 from __future__ import annotations
 
 import html
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import resume, store
+from . import classify, metrics, resume, store
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 TEMPLATE_PATH = WEB_DIR / "trace.html"
 
 # How much of a tool input/result preview to show per event.
 _PREVIEW_CHARS = 400
+
+# Export formats and their file extensions.
+FORMATS = ("html", "json", "md")
+
+
+def render(session_id: str, output_dir: str | Path, fmt: str = "html") -> Path:
+    """Render a session in `fmt` (html | json | md). Dispatches to the format
+    renderers, all of which write one self-contained file and return its path."""
+    fmt = (fmt or "html").lower()
+    if fmt == "html":
+        return render_html(session_id, output_dir)
+    if fmt == "json":
+        return render_json(session_id, output_dir)
+    if fmt in ("md", "markdown"):
+        return render_markdown(session_id, output_dir)
+    raise ValueError(f"Unknown export format: {fmt} (expected one of {', '.join(FORMATS)})")
 
 
 def render_html(session_id: str, output_dir: str | Path) -> Path:
@@ -48,6 +65,84 @@ def render_html(session_id: str, output_dir: str | Path) -> Path:
     out_path = out_dir / f"claude-replay-{session_id[:8]}-{_date_str(session['started_at'])}.html"
     out_path.write_text(rendered, encoding="utf-8")
     return out_path
+
+
+# ── JSON / Markdown ───────────────────────────────────────────────────────────
+
+def render_json(session_id: str, output_dir: str | Path) -> Path:
+    """Structured, machine-readable export — the whole session as one JSON file,
+    for external tooling (native /export is plaintext-only)."""
+    payload = _gather(session_id)
+    out_path = _out_path(output_dir, session_id, payload["session"]["started_at"], "json")
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return out_path
+
+
+def render_markdown(session_id: str, output_dir: str | Path) -> Path:
+    """Human-readable Markdown export — a portable trace you can paste anywhere."""
+    d = _gather(session_id)
+    s, m = d["session"], d["metrics"]
+    lines = [
+        f"# Claude Replay — {session_id[:8]}",
+        "",
+        f"- **Objective:** {s['objective'] or '(not recorded)'}",
+        f"- **Status:** {s['status']}  ·  **How it ended:** {d['death']['label']}",
+        f"- **Model:** {s['model'] or '(unknown)'}",
+        f"- **Project:** {s['project_dir'] or '—'}",
+        f"- **Started:** {s['started_at'] or '—'}  ·  **Ended:** {s['ended_at'] or '—'}",
+        f"- **Duration:** {m['duration_human']}  ·  **Tool calls:** {m['tool_calls']} "
+        f"({m['error_count']} errors)  ·  **Files touched:** {m['files_touched']}",
+    ]
+    if s["tags"]:
+        lines.append(f"- **Tags:** {', '.join(s['tags'])}")
+    lines += ["", "## Timeline", ""]
+    for item in _merged_timeline(d["events"], d["checkpoints"]):
+        lines.append(item)
+    if d["files"]:
+        lines += ["", "## Files touched", ""] + [f"- `{f}`" for f in d["files"]]
+    lines += ["", "## Resume brief", "", "```", d["brief"], "```", ""]
+    out_path = _out_path(output_dir, session_id, s["started_at"], "md")
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+    return out_path
+
+
+def _gather(session_id: str) -> dict[str, Any]:
+    """Common data bundle for the JSON/Markdown renderers."""
+    data = store.get_resume_data(session_id)
+    if data is None:
+        raise ValueError(f"No session found with id: {session_id}")
+    session = data["session"]
+    events = store.list_events(session_id)
+    checkpoints = store.list_checkpoints(session_id)
+    return {
+        "session": session,
+        "events": events,
+        "checkpoints": checkpoints,
+        "files": store.files_touched(session_id),
+        "metrics": metrics.compute(session, events),
+        "death": classify.classify(session, events),
+        "brief": resume.generate_brief(session_id),
+        "event_count": data["event_count"],
+        "checkpoint_count": data["checkpoint_count"],
+    }
+
+
+def _merged_timeline(events: list[dict[str, Any]], checkpoints: list[dict[str, Any]]) -> list[str]:
+    items: list[tuple[str, str, dict[str, Any]]] = []
+    for e in events:
+        items.append((e["timestamp"], "event", e))
+    for c in checkpoints:
+        items.append((c["timestamp"], "checkpoint", c))
+    items.sort(key=lambda x: (x[0], x[1] == "checkpoint"))
+    out: list[str] = []
+    for _, kind, obj in items:
+        if kind == "checkpoint":
+            nxt = f" → next: {obj['step_next']}" if obj.get("step_next") else ""
+            out.append(f"- `cp{obj['seq']}` **checkpoint** — {obj['step_done'] or ''}{nxt}")
+        else:
+            name = obj["tool_name"] or obj["event_type"]
+            out.append(f"- `#{obj['seq']}` {obj['event_type']} — {name}")
+    return out or ["_(no events recorded)_"]
 
 
 # ── Template ──────────────────────────────────────────────────────────────────
@@ -173,6 +268,12 @@ def _render_filemap(session: dict[str, Any], checkpoints: list[dict[str, Any]]) 
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _out_path(output_dir: str | Path, session_id: str, started: str | None, ext: str) -> Path:
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir / f"claude-replay-{session_id[:8]}-{_date_str(started)}.{ext}"
+
 
 def _date_str(iso: str | None) -> str:
     if not iso:

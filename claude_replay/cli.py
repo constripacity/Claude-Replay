@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -206,7 +207,7 @@ def cmd_resume(session_id: str | None) -> int:
     return 0
 
 
-def cmd_export(session_id: str | None, output_dir: str | None) -> int:
+def cmd_export(session_id: str | None, output_dir: str | None, fmt: str = "html") -> int:
     from . import export
 
     sid = session_id or _latest_session_id()
@@ -214,11 +215,11 @@ def cmd_export(session_id: str | None, output_dir: str | None) -> int:
         print("No sessions recorded yet.")
         return 1
     try:
-        path = export.render_html(sid, output_dir or _default_export_dir())
+        path = export.render(sid, output_dir or _default_export_dir(), fmt)
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
-    print(f"✓ Exported trace → {path}")
+    print(f"✓ Exported {fmt} trace → {path}")
     return 0
 
 
@@ -243,12 +244,17 @@ def cmd_sessions(limit: int) -> int:
     return 0
 
 
-def cmd_search(query: str, limit: int) -> int:
-    results = store.search(query, limit)
+def cmd_search(query: str, limit: int, *, tool: str | None = None, cause: str | None = None,
+               since: str | None = None, until: str | None = None, project: str | None = None) -> int:
+    results = store.search(
+        query, limit, tool=tool, cause=cause,
+        since=_resolve_date(since), until=_resolve_date(until), project=project,
+    )
+    label = f"'{query}'" if query.strip() else "those filters"
     if not results:
-        print(f"No matches for: {query}")
+        print(f"No matches for {label}.")
         return 0
-    print(f"{len(results)} session(s) match '{query}':")
+    print(f"{len(results)} session(s) match {label}:")
     for r in results:
         s = r["session"]
         label = s["name"] or s["objective"] or "(no objective)"
@@ -257,6 +263,43 @@ def cmd_search(query: str, limit: int) -> int:
         print(f"  {s['id'][:8]}  [{s['status']}]  {r['matches']} match{plural}  {label[:54]}{tags}")
         if r["snippet"]:
             print(f"      … {r['snippet']}")
+    return 0
+
+
+def cmd_diff(session_a: str, session_b: str) -> int:
+    cmp = store.compare(session_a, session_b)
+    if cmp is None:
+        print("error: one or both sessions not found", file=sys.stderr)
+        return 1
+    a, b, d = cmp["a"], cmp["b"], cmp["deltas"]
+
+    def col(side):
+        s, m = side["session"], side["metrics"]
+        return s["id"][:8], s["name"] or s["objective"] or "(no objective)", m
+
+    ida, laba, ma = col(a)
+    idb, labb, mb = col(b)
+    print(f"{'':14}{'A: ' + ida:32}{'B: ' + idb}")
+    print(f"{'':14}{laba[:30]:32}{labb[:30]}")
+    print(f"{'how it ended':14}{ma['death_label']:32}{mb['death_label']}")
+
+    def row(name, key, fmt=str):
+        delta = d.get(key)
+        sign = f"  (Δ {'+' if delta and delta > 0 else ''}{delta})" if delta else ""
+        print(f"{name:14}{fmt(ma[key]):32}{fmt(mb[key])}{sign}")
+
+    row("duration (s)", "duration_seconds")
+    row("tool calls", "tool_calls")
+    row("errors", "error_count")
+    row("files touched", "files_touched")
+
+    files = cmp["files"]
+    if files["only_a"]:
+        print(f"\nonly in A: {', '.join(files['only_a'])}")
+    if files["only_b"]:
+        print(f"only in B: {', '.join(files['only_b'])}")
+    if files["both"]:
+        print(f"in both:   {', '.join(files['both'])}")
     return 0
 
 
@@ -315,16 +358,31 @@ def _parse_age(spec: str) -> int | None:
     return n * 7 if m.group(2) == "w" else n
 
 
+def _resolve_date(spec: str | None) -> str | None:
+    """Resolve a --since/--until value to an ISO bound. Accepts a relative age
+    ('7d', '4w') → now minus that, or passes an ISO date/datetime through as-is
+    (compares lexicographically against the stored Zulu timestamps)."""
+    if spec is None:
+        return None
+    days = _parse_age(spec)
+    if days is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        return cutoff.isoformat(timespec="seconds").replace("+00:00", "Z")
+    return spec
+
+
 def cmd_status() -> int:
     sid = _latest_session_id()
     if sid is None:
         print("No sessions recorded yet.")
         return 0
-    from . import classify
+    from . import classify, metrics
 
     data = store.get_resume_data(sid)
     s = data["session"]
-    death = classify.classify(s, store.list_events(sid))
+    events = store.list_events(sid)
+    death = classify.classify(s, events)
+    m = metrics.compute(s, events)
     print(f"Session:     {s['id']}")
     if s["name"]:
         print(f"Name:        {s['name']}")
@@ -341,6 +399,14 @@ def cmd_status() -> int:
     print(f"Duration:    {_duration(s['started_at'], s['ended_at'])}")
     print(f"Events:      {data['event_count']}")
     print(f"Checkpoints: {data['checkpoint_count']}")
+    print("Insights:")
+    print(f"  Duration:    {m['duration_human']}")
+    print(f"  Tool calls:  {m['tool_calls']}  ({m['error_count']} errors, "
+          f"{m['error_rate']:.0%} error rate)")
+    print(f"  Files touched: {m['files_touched']}")
+    if m["top_tools"]:
+        tools = ", ".join(f"{name}×{count}" for name, count in m["top_tools"])
+        print(f"  Top tools:   {tools}")
     return 0
 
 
@@ -420,16 +486,29 @@ def main(argv: list[str] | None = None) -> int:
     resume_p = sub.add_parser("resume", help="Print a resume brief for the last (or given) session")
     resume_p.add_argument("session_id", nargs="?", default=None, help="Session ID (default: most recent)")
 
-    export_p = sub.add_parser("export", help="Export a session as a self-contained HTML trace")
+    export_p = sub.add_parser("export", help="Export a session as a self-contained trace")
     export_p.add_argument("session_id", nargs="?", default=None, help="Session ID (default: most recent)")
     export_p.add_argument("--output", default=None, help="Output directory (default: ~/.claude-replay/exports)")
+    export_p.add_argument("--format", default="html", choices=["html", "json", "md"],
+                          help="Export format (default: html)")
 
     sessions_p = sub.add_parser("sessions", help="List recent sessions")
     sessions_p.add_argument("--limit", type=int, default=10, help="How many to show (default: 10)")
 
-    search_p = sub.add_parser("search", help="Full-text search across sessions")
-    search_p.add_argument("query", help="Text to search for (event payloads, objective, name, tags)")
+    search_p = sub.add_parser("search", help="Full-text search across sessions (with filters)")
+    search_p.add_argument("query", nargs="?", default="",
+                          help="Text to search for (omit to browse by filters alone)")
     search_p.add_argument("--limit", type=int, default=20, help="Max sessions to return (default: 20)")
+    search_p.add_argument("--tool", default=None, help="Only sessions that used this tool (e.g. Bash)")
+    search_p.add_argument("--cause", default=None,
+                          help="Only sessions with this death cause (e.g. rate_limit, interrupted)")
+    search_p.add_argument("--since", default=None, help="Only sessions started after (7d, 4w, or ISO date)")
+    search_p.add_argument("--until", default=None, help="Only sessions started before (7d, 4w, or ISO date)")
+    search_p.add_argument("--project", default=None, help="Only sessions whose project dir contains this")
+
+    diff_p = sub.add_parser("diff", help="Compare two sessions side by side")
+    diff_p.add_argument("session_a", help="First session ID")
+    diff_p.add_argument("session_b", help="Second session ID")
 
     prune_p = sub.add_parser("prune", help="Delete sessions older than a cutoff (destructive)")
     prune_p.add_argument("--older-than", default="30d",
@@ -475,11 +554,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "resume":
         return cmd_resume(args.session_id)
     if args.command == "export":
-        return cmd_export(args.session_id, args.output)
+        return cmd_export(args.session_id, args.output, args.format)
     if args.command == "sessions":
         return cmd_sessions(args.limit)
     if args.command == "search":
-        return cmd_search(args.query, args.limit)
+        return cmd_search(args.query, args.limit, tool=args.tool, cause=args.cause,
+                          since=args.since, until=args.until, project=args.project)
+    if args.command == "diff":
+        return cmd_diff(args.session_a, args.session_b)
     if args.command == "prune":
         return cmd_prune(args.older_than, args.yes)
     if args.command == "tag":

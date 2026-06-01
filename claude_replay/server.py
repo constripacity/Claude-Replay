@@ -3,7 +3,7 @@ Claude Replay — Starlette app: MCP SSE tools + JSON API + static dashboard.
 
 A thin read/write surface over the SQLite store. All persistence lives in
 store.py; this module exposes it several ways:
-  - Seven `replay_*` MCP tools over SSE at /sse (for Claude Code agents)
+  - Nine `replay_*` MCP tools over SSE at /sse (for Claude Code agents)
   - The same tools over stdio via run_stdio (for `uvx claude-replay mcp` / any client)
   - A JSON HTTP API under /api/* (for the dashboard or any client)
   - A static dashboard at / (claude_replay/web/index.html)
@@ -171,12 +171,13 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="replay_export",
-            description="Render a session as a self-contained HTML trace and return the output path.",
+            description="Render a session as a self-contained trace (html, json, or md) and return the output path.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "session_id": {"type": "string", "description": "Session ID (default: most recent)"},
                     "output": {"type": "string", "description": "Output directory (default: ~/.claude-replay/exports)"},
+                    "format": {"type": "string", "enum": ["html", "json", "md"], "description": "Export format (default: html)"},
                 },
             },
         ),
@@ -184,15 +185,20 @@ async def list_tools() -> list[Tool]:
             name="replay_search",
             description=(
                 "Full-text search across recorded sessions (event payloads, objective, "
-                "name, and tags). Returns matching sessions ranked by match count."
+                "name, and tags), with optional filters. Ranked by match count. Omit the "
+                "query to browse by filters alone."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Text to search for"},
+                    "query": {"type": "string", "description": "Text to search for (optional if filtering)"},
                     "limit": {"type": "integer", "description": "Max sessions (default: 20)", "default": 20},
+                    "tool": {"type": "string", "description": "Only sessions that used this tool"},
+                    "cause": {"type": "string", "description": "Only sessions with this death cause"},
+                    "since": {"type": "string", "description": "Only sessions started after this ISO date"},
+                    "until": {"type": "string", "description": "Only sessions started before this ISO date"},
+                    "project": {"type": "string", "description": "Only sessions whose project dir contains this"},
                 },
-                "required": ["query"],
             },
         ),
         Tool(
@@ -209,6 +215,34 @@ async def list_tools() -> list[Tool]:
                     "add": {"type": "array", "items": {"type": "string"}, "description": "Tags to add"},
                     "remove": {"type": "array", "items": {"type": "string"}, "description": "Tags to remove"},
                 },
+            },
+        ),
+        Tool(
+            name="replay_insights",
+            description=(
+                "Per-session insight metrics: how it ended, duration, tool-call count, "
+                "error count/rate, files touched, and the most-used tools."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Session ID (default: most recent)"},
+                },
+            },
+        ),
+        Tool(
+            name="replay_diff",
+            description=(
+                "Compare two sessions side by side: metric deltas (tool calls, errors, "
+                "duration, files) and which files each touched."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_a": {"type": "string", "description": "First session ID"},
+                    "session_b": {"type": "string", "description": "Second session ID"},
+                },
+                "required": ["session_a", "session_b"],
             },
         ),
     ]
@@ -274,19 +308,21 @@ async def dispatch_tool(name: str, arguments: dict[str, Any]) -> list[TextConten
             return [TextContent(type="text", text="No sessions recorded yet.")]
         output = arguments.get("output") or str(Path.home() / ".claude-replay" / "exports")
         try:
-            path = export.render_html(sid, output)
+            path = export.render(sid, output, arguments.get("format") or "html")
         except ValueError as e:
             return [TextContent(type="text", text=f"error: {e}")]
         return [TextContent(type="text", text=f"✓ Exported trace → {path}")]
 
     if name == "replay_search":
         query = str(arguments.get("query") or "").strip()
-        if not query:
-            return [TextContent(type="text", text="Provide a non-empty query.")]
-        results = store.search(query, int(arguments.get("limit", 20)))
+        filters = {k: arguments.get(k) for k in ("tool", "cause", "since", "until", "project")}
+        if not query and not any(filters.values()):
+            return [TextContent(type="text", text="Provide a query or at least one filter.")]
+        results = store.search(query, int(arguments.get("limit", 20)), **filters)
+        label = f"'{query}'" if query else "those filters"
         if not results:
-            return [TextContent(type="text", text=f"No matches for: {query}")]
-        lines = [f"{len(results)} session(s) match '{query}':"]
+            return [TextContent(type="text", text=f"No matches for {label}.")]
+        lines = [f"{len(results)} session(s) match {label}:"]
         for r in results:
             s = r["session"]
             label = s["name"] or s["objective"] or "(no objective)"
@@ -310,6 +346,43 @@ async def dispatch_tool(name: str, arguments: dict[str, Any]) -> list[TextConten
         s = store.get_session(sid)
         tags = ", ".join(s["tags"]) or "—"
         return [TextContent(type="text", text=f"✓ {sid[:8]}  name: {s['name'] or '—'}  tags: {tags}")]
+
+    if name == "replay_insights":
+        from . import metrics
+
+        sid = arguments.get("session_id") or _latest_session_id()
+        if sid is None:
+            return [TextContent(type="text", text="No sessions recorded yet.")]
+        session = store.get_session(sid)
+        if session is None:
+            return [TextContent(type="text", text=f"error: no session with id: {sid}")]
+        m = metrics.compute(session, store.list_events(sid))
+        tools = ", ".join(f"{n}×{c}" for n, c in m["top_tools"]) or "—"
+        text = (
+            f"Insights for {sid[:8]}:\n"
+            f"  How it ended: {m['death_label']}\n"
+            f"  Duration:     {m['duration_human']}\n"
+            f"  Tool calls:   {m['tool_calls']}  ({m['error_count']} errors, {m['error_rate']:.0%})\n"
+            f"  Files touched: {m['files_touched']}\n"
+            f"  Top tools:    {tools}"
+        )
+        return [TextContent(type="text", text=text)]
+
+    if name == "replay_diff":
+        cmp = store.compare(arguments.get("session_a", ""), arguments.get("session_b", ""))
+        if cmp is None:
+            return [TextContent(type="text", text="error: one or both sessions not found")]
+        a, b, d = cmp["a"], cmp["b"], cmp["deltas"]
+        text = (
+            f"Compare {a['session']['id'][:8]} (A) vs {b['session']['id'][:8]} (B):\n"
+            f"  how it ended: {a['metrics']['death_label']}  →  {b['metrics']['death_label']}\n"
+            f"  tool calls:   {a['metrics']['tool_calls']}  →  {b['metrics']['tool_calls']}  (Δ {d['tool_calls']:+})\n"
+            f"  errors:       {a['metrics']['error_count']}  →  {b['metrics']['error_count']}  (Δ {d['error_count']:+})\n"
+            f"  files:        {a['metrics']['files_touched']}  →  {b['metrics']['files_touched']}  (Δ {d['files_touched']:+})\n"
+            f"  only in A:    {', '.join(cmp['files']['only_a']) or '—'}\n"
+            f"  only in B:    {', '.join(cmp['files']['only_b']) or '—'}"
+        )
+        return [TextContent(type="text", text=text)]
 
     return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -346,7 +419,7 @@ async def api_state(request: Request) -> JSONResponse:
 
 
 async def api_session(request: Request) -> JSONResponse:
-    from . import classify
+    from . import classify, metrics
 
     sid = request.path_params["session_id"]
     session = store.get_session(sid)
@@ -359,16 +432,19 @@ async def api_session(request: Request) -> JSONResponse:
         "session": session,
         "events": events,
         "checkpoints": store.list_checkpoints(sid),
+        "metrics": metrics.compute(session, events),
     })
 
 
 async def api_search(request: Request) -> JSONResponse:
-    query = request.query_params.get("q", "").strip()
+    qp = request.query_params
+    query = qp.get("q", "").strip()
     try:
-        limit = int(request.query_params.get("limit", 20))
+        limit = int(qp.get("limit", 20))
     except (TypeError, ValueError):
         limit = 20
-    results = store.search(query, limit) if query else []
+    filters = {k: (qp.get(k) or None) for k in ("tool", "cause", "since", "until", "project")}
+    results = store.search(query, limit, **filters) if (query or any(filters.values())) else []
     return JSONResponse({
         "query": query,
         "count": len(results),
@@ -378,6 +454,13 @@ async def api_search(request: Request) -> JSONResponse:
             for r in results
         ],
     })
+
+
+async def api_diff(request: Request) -> JSONResponse:
+    cmp = store.compare(request.query_params.get("a", ""), request.query_params.get("b", ""))
+    if cmp is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return JSONResponse(cmp)
 
 
 async def api_resume(request: Request) -> JSONResponse:
@@ -390,8 +473,9 @@ async def api_resume(request: Request) -> JSONResponse:
 async def api_export(request: Request) -> JSONResponse:
     sid = request.path_params["session_id"]
     output = request.query_params.get("output") or str(Path.home() / ".claude-replay" / "exports")
+    fmt = request.query_params.get("format") or "html"
     try:
-        path = export.render_html(sid, output)
+        path = export.render(sid, output, fmt)
     except ValueError:
         return JSONResponse({"error": "not found"}, status_code=404)
     return JSONResponse({"session_id": sid, "path": str(path)})
@@ -450,6 +534,7 @@ _routes = [
     Route("/status", endpoint=http_status),
     Route("/api/state", endpoint=api_state),
     Route("/api/search", endpoint=api_search),
+    Route("/api/diff", endpoint=api_diff),
     Route("/api/session/{session_id}", endpoint=api_session),
     Route("/api/resume/{session_id}", endpoint=api_resume),
     Route("/api/export/{session_id}", endpoint=api_export),

@@ -304,12 +304,22 @@ class TestExportCommand:
         rc = cli.cmd_export(None, str(tmp_path))
         assert rc == 0
         out = capsys.readouterr().out
-        assert "Exported trace" in out
+        assert "Exported" in out and "trace" in out
         assert list(tmp_path.glob("*.html"))
 
     def test_main_export(self, fresh_db, tmp_path):
         _seed()
         assert cli.main(["export", "--output", str(tmp_path)]) == 0
+
+    def test_export_json_format(self, fresh_db, tmp_path):
+        _seed()
+        assert cli.main(["export", "--output", str(tmp_path), "--format", "json"]) == 0
+        assert list(tmp_path.glob("*.json"))
+
+    def test_export_md_format(self, fresh_db, tmp_path):
+        _seed()
+        assert cli.cmd_export(None, str(tmp_path), "md") == 0
+        assert list(tmp_path.glob("*.md"))
 
 
 class TestSessionsCommand:
@@ -346,6 +356,14 @@ class TestStatusCommand:
         assert "Do a thing" in out
         assert "Checkpoints: 1" in out
 
+    def test_shows_insights(self, fresh_db, capsys):
+        _seed()
+        cli.cmd_status()
+        out = capsys.readouterr().out
+        assert "Insights:" in out
+        assert "Tool calls:" in out
+        assert "Top tools:" in out
+
     def test_main_status(self, fresh_db):
         _seed()
         assert cli.main(["status"]) == 0
@@ -368,6 +386,26 @@ class TestSearchCommand:
     def test_main_search(self, fresh_db):
         _seed()
         assert cli.main(["search", "thing"]) == 0
+
+
+class TestDiffCommand:
+    def test_missing_session(self, fresh_db, capsys):
+        assert cli.cmd_diff("nope", "nada") == 1
+        assert "not found" in capsys.readouterr().err
+
+    def test_diff_output(self, fresh_db, capsys):
+        _seed("sess-a")
+        _seed("sess-b")
+        rc = cli.cmd_diff("sess-a", "sess-b")
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "A: sess-a"[:8] in out
+        assert "tool calls" in out
+
+    def test_main_diff(self, fresh_db):
+        _seed("sess-a")
+        _seed("sess-b")
+        assert cli.main(["diff", "sess-a", "sess-b"]) == 0
 
 
 class TestPruneCommand:

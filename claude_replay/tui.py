@@ -74,6 +74,13 @@ def _short_uptime(seconds: int) -> str:
     return f"{days}d{rem_h}h" if rem_h else f"{days}d"
 
 
+def _short_project(path: str) -> str:
+    """Last path segment of a project dir, for the sidebar group header."""
+    if not path or path == "(no project)":
+        return "(no project)"
+    return path.rstrip("/\\").replace("\\", "/").rsplit("/", 1)[-1] or path
+
+
 def _event_detail(event: dict[str, Any]) -> str:
     """One-line summary of an event for the feed's DETAIL column."""
     if event.get("error_msg"):
@@ -128,25 +135,40 @@ class SessionList(ListView):
         if not sessions:
             await self.append(ListItem(Label("[#484f58]no sessions yet[/]")))
             return
+        # Group by project, preserving first-appearance (recency) order; a dim
+        # header line sits above the first session of each project group.
+        order: list[str] = []
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for s in sessions:
+            p = s.get("project_dir") or "(no project)"
+            if p not in groups:
+                groups[p] = []
+                order.append(p)
+            groups[p].append(s)
+
         active_index: int | None = None
-        for idx, s in enumerate(sessions):
-            sid = s["id"]
-            scolor = status_color(s.get("status"))
-            glyph = status_glyph(s.get("status"))
-            marker = "▶" if sid == active else " "
-            model = (s.get("model") or "—")[:14].ljust(14)
-            ckpts = str(s.get("checkpoints", 0)).rjust(3)
-            item = ListItem(
-                Label(
-                    f"[#58a6ff]{marker}[/] [{scolor}]{glyph}[/] "
-                    f"[#e6edf3]{short_id(sid)}[/] [#6e7681]{model}[/] "
-                    f"[#bc8cff]{ckpts}c[/]"
+        idx = 0
+        for project in order:
+            for j, s in enumerate(groups[project]):
+                sid = s["id"]
+                scolor = status_color(s.get("status"))
+                glyph = status_glyph(s.get("status"))
+                marker = "▶" if sid == active else " "
+                model = (s.get("model") or "—")[:14].ljust(14)
+                ckpts = str(s.get("checkpoints", 0)).rjust(3)
+                header = f"[#484f58]{_short_project(project)}[/]\n" if j == 0 else ""
+                item = ListItem(
+                    Label(
+                        f"{header}[#58a6ff]{marker}[/] [{scolor}]{glyph}[/] "
+                        f"[#e6edf3]{short_id(sid)}[/] [#6e7681]{model}[/] "
+                        f"[#bc8cff]{ckpts}c[/]"
+                    )
                 )
-            )
-            item.session_id = sid  # type: ignore[attr-defined]
-            await self.append(item)
-            if sid == active:
-                active_index = idx
+                item.session_id = sid  # type: ignore[attr-defined]
+                await self.append(item)
+                if sid == active:
+                    active_index = idx
+                idx += 1
         if active_index is not None:
             self.index = active_index
 
@@ -204,6 +226,18 @@ class Inspector(VerticalScroll):
         if tags:
             chips = "  ".join(f"[#7dd3fc]#{t}[/]" for t in tags)
             self.mount(Static(f"[#6e7681]tags      [/] {chips}"))
+
+        m = detail.get("metrics")
+        if m:
+            self.mount(Static(""))
+            self.mount(Label("[bold #e6edf3]INSIGHTS[/]"))
+            self.mount(Static(f"[#6e7681]duration  [/] [#e6edf3]{m.get('duration_human', '—')}[/]"))
+            err = f"  [#f85149]{m['error_count']} err[/]" if m.get("error_count") else ""
+            self.mount(Static(f"[#6e7681]tool calls[/] [#e6edf3]{m.get('tool_calls', 0)}[/]{err}"))
+            self.mount(Static(f"[#6e7681]files     [/] [#e6edf3]{m.get('files_touched', 0)}[/]"))
+            top = "  ".join(f"{n}[#6e7681]×{c}[/]" for n, c in (m.get("top_tools") or [])[:4])
+            if top:
+                self.mount(Static(f"[#6e7681]top tools [/] {top}"))
         self.mount(Static(""))
         self.mount(Label("[bold #e6edf3]OBJECTIVE[/]"))
         self.mount(Static(Text(s.get("objective") or "(not recorded)", style="#e6edf3")))

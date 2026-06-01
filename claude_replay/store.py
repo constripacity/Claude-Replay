@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 # Whether the SQLite build has FTS5. Set during schema setup; search() falls
 # back to a LIKE scan when it's False, so search works on any build.
@@ -483,65 +483,109 @@ def get_resume_data(session_id: str) -> dict[str, Any] | None:
 
 # ── Search ────────────────────────────────────────────────────────────────────
 
-def search(query: str, limit: int = 20) -> list[dict[str, Any]]:
-    """Full-text search across event payloads + session metadata.
+def search(
+    query: str,
+    limit: int = 20,
+    *,
+    tool: str | None = None,
+    cause: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    project: str | None = None,
+) -> list[dict[str, Any]]:
+    """Full-text search across event payloads + session metadata, with optional
+    filters.
 
     Returns sessions ranked by match count (recency breaks ties), each as
-    ``{'session', 'matches', 'snippet'}``. Uses FTS5 when available, else a
-    LIKE scan — same results, just slower on a large DB."""
+    ``{'session', 'matches', 'snippet'}``. Uses FTS5 when available, else a LIKE
+    scan. Filters narrow the result: `tool` (used that tool), `cause` (death
+    cause from classify), `since`/`until` (ISO bounds on started_at), `project`
+    (substring of project_dir). With an empty query but ≥1 filter, browses all
+    recent sessions through the filters instead of returning nothing."""
     q = query.strip()
-    if not q:
+    has_filters = any((tool, cause, since, until, project))
+    if not q and not has_filters:
         return []
     conn = db()
     hits: dict[str, dict[str, Any]] = {}
 
-    if _FTS_ENABLED:
-        try:
+    if not q:
+        # Filter-only browse: every recent session is a candidate (matches=0).
+        for s in list_sessions(500):
+            hits[s["id"]] = {"matches": 0, "snippet": None}
+    else:
+        if _FTS_ENABLED:
+            try:
+                rows = conn.execute(
+                    """SELECT e.session_id AS sid,
+                              snippet(events_fts, -1, '«', '»', '…', 10) AS snip
+                       FROM events_fts
+                       JOIN events e ON e.id = events_fts.rowid
+                       WHERE events_fts MATCH ?
+                       ORDER BY rank""",
+                    (_fts_query(q),),
+                ).fetchall()
+                for r in rows:
+                    _record_hit(hits, r["sid"], r["snip"])
+            except sqlite3.OperationalError:
+                pass  # an unparsable FTS expression — fall through to LIKE below
+        if not _FTS_ENABLED or not hits:
+            like = f"%{q}%"
             rows = conn.execute(
-                """SELECT e.session_id AS sid,
-                          snippet(events_fts, -1, '«', '»', '…', 10) AS snip
-                   FROM events_fts
-                   JOIN events e ON e.id = events_fts.rowid
-                   WHERE events_fts MATCH ?
-                   ORDER BY rank""",
-                (_fts_query(q),),
+                """SELECT session_id AS sid, tool_input, tool_result FROM events
+                   WHERE tool_name LIKE ? OR tool_input LIKE ? OR tool_result LIKE ?""",
+                (like, like, like),
             ).fetchall()
             for r in rows:
-                _record_hit(hits, r["sid"], r["snip"])
-        except sqlite3.OperationalError:
-            pass  # an unparsable FTS expression — fall through to LIKE below
-    if not _FTS_ENABLED or not hits:
-        like = f"%{q}%"
-        rows = conn.execute(
-            """SELECT session_id AS sid, tool_input, tool_result FROM events
-               WHERE tool_name LIKE ? OR tool_input LIKE ? OR tool_result LIKE ?""",
-            (like, like, like),
-        ).fetchall()
-        for r in rows:
-            _record_hit(hits, r["sid"], r["tool_input"] or r["tool_result"])
+                _record_hit(hits, r["sid"], r["tool_input"] or r["tool_result"])
 
-    # Session metadata (objective / name / tags) matches too — short fields, LIKE.
-    like = f"%{q.lower()}%"
-    for r in conn.execute(
-        """SELECT id FROM sessions
-           WHERE lower(COALESCE(objective, '')) LIKE ?
-              OR lower(COALESCE(name, ''))      LIKE ?
-              OR lower(COALESCE(tags, ''))      LIKE ?""",
-        (like, like, like),
-    ).fetchall():
-        hits.setdefault(r["id"], {"matches": 0, "snippet": None})
+        # Session metadata (objective / name / tags) matches too — short fields, LIKE.
+        like = f"%{q.lower()}%"
+        for r in conn.execute(
+            """SELECT id FROM sessions
+               WHERE lower(COALESCE(objective, '')) LIKE ?
+                  OR lower(COALESCE(name, ''))      LIKE ?
+                  OR lower(COALESCE(tags, ''))      LIKE ?""",
+            (like, like, like),
+        ).fetchall():
+            hits.setdefault(r["id"], {"matches": 0, "snippet": None})
 
     results: list[dict[str, Any]] = []
     for sid, info in hits.items():
         session = get_session(sid)
-        if session is not None:
-            results.append(
-                {"session": session, "matches": info["matches"], "snippet": info["snippet"]}
-            )
+        if session is None or not _passes_filters(session, sid, tool, cause, since, until, project):
+            continue
+        results.append(
+            {"session": session, "matches": info["matches"], "snippet": info["snippet"]}
+        )
     results.sort(
         key=lambda r: (r["matches"], r["session"]["started_at"] or ""), reverse=True
     )
     return results[:limit]
+
+
+def _passes_filters(
+    session: dict[str, Any], sid: str,
+    tool: str | None, cause: str | None,
+    since: str | None, until: str | None, project: str | None,
+) -> bool:
+    """Whether a candidate session satisfies every supplied search filter."""
+    started = session.get("started_at") or ""
+    if project and project.lower() not in (session.get("project_dir") or "").lower():
+        return False
+    if since and started < since:
+        return False
+    if until and started > until:
+        return False
+    if tool and not db().execute(
+        "SELECT 1 FROM events WHERE session_id = ? AND tool_name = ? LIMIT 1", (sid, tool)
+    ).fetchone():
+        return False
+    if cause:
+        from . import classify  # local import: classify has no DB deps, no cycle
+        if classify.classify(session, list_events(sid))["cause"] != cause:
+            return False
+    return True
 
 
 def _record_hit(hits: dict[str, dict[str, Any]], sid: str, snippet: Any) -> None:
@@ -557,6 +601,35 @@ def _fts_query(query: str) -> str:
     becomes a quoted term (ANDed), so user input can't trip FTS5 operators."""
     tokens = [t for t in re.split(r"\s+", query.strip()) if t]
     return " ".join('"' + t.replace('"', '""') + '"' for t in tokens)
+
+
+# ── Compare ───────────────────────────────────────────────────────────────────
+
+def compare(id_a: str, id_b: str) -> dict[str, Any] | None:
+    """Compare two sessions: per-side metrics, numeric deltas (b − a), and a
+    file-map diff (only-a / only-b / both). Returns None if either is missing."""
+    from . import metrics  # local import: metrics imports store, avoid a cycle
+
+    sa, sb = get_session(id_a), get_session(id_b)
+    if sa is None or sb is None:
+        return None
+    ma = metrics.compute(sa, list_events(id_a))
+    mb = metrics.compute(sb, list_events(id_b))
+    files_a, files_b = set(files_touched(id_a)), set(files_touched(id_b))
+
+    delta_keys = ("tool_calls", "event_count", "error_count", "files_touched", "duration_seconds")
+    deltas = {k: (mb.get(k) or 0) - (ma.get(k) or 0) for k in delta_keys}
+
+    return {
+        "a": {"session": sa, "metrics": ma},
+        "b": {"session": sb, "metrics": mb},
+        "deltas": deltas,
+        "files": {
+            "only_a": sorted(files_a - files_b),
+            "only_b": sorted(files_b - files_a),
+            "both": sorted(files_a & files_b),
+        },
+    }
 
 
 # ── Retention ─────────────────────────────────────────────────────────────────

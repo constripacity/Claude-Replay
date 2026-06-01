@@ -1,10 +1,18 @@
 # Claude Replay — context for Claude Code
 
 ## What this repo is
-Session checkpoint and recovery layer for Claude Code. Hooks silently into
-every session via Claude Code's hooks system. Stores events + checkpoints in
-SQLite. Exposes 7 MCP tools for recovery, search, and export. Sibling to Claude
-Bridge under Constripacity.
+Observability layer for Claude Code sessions — the cross-project search /
+analytics / visualization that complements native resume/rewind (it does NOT
+re-implement them; see the positioning note below). Hooks silently into every
+session, stores events + checkpoints in SQLite, exposes 9 MCP tools. Sibling to
+Claude Bridge under Constripacity.
+
+## Positioning (load-bearing — read before adding features)
+Native Claude Code already does resume (`--continue`/`--resume`), rewind
+(`/rewind`), and plaintext `/export`. Replay must NOT duplicate those. Build only
+in the differentiated lane: full-text **search**, per-session **analytics**
+(metrics.py / classify.py), session **diff**, and **visualization** (dashboard/TUI/
+structured export). Filter every new feature through "does native already do this?"
 
 ## Architecture in one sentence
 Passive hooks write to SQLite. MCP tools read from SQLite. Dashboard + TUI
@@ -18,7 +26,8 @@ visualize SQLite. Nothing else.
 - claude_replay/hooks.py      — hook handlers, dispatched by `claude-replay hook <type>`
 - claude_replay/resume.py     — resume brief generation (death cause + live git state)
 - claude_replay/classify.py   — death-cause classification (pure, no DB access)
-- claude_replay/export.py     — HTML trace rendering
+- claude_replay/metrics.py    — per-session insight metrics (pure, no DB access)
+- claude_replay/export.py     — trace rendering (html / json / md)
 - claude_replay/server.py     — Starlette app (MCP SSE + JSON API + static)
 - claude_replay/tui_client.py — async httpx client over the JSON API (testable, no Textual)
 - claude_replay/tui.py        — Textual session browser (talks to a running `serve`, never the DB)
@@ -26,7 +35,7 @@ visualize SQLite. Nothing else.
 
 ## CLI subcommands
 install · uninstall · hook <pre-tool|post-tool|stop> · status · sessions ·
-search · resume · export · tag · prune · serve · mcp · tui · reset
+search · diff · resume · export · tag · prune · serve · mcp · tui · reset
 
 ## DB location
 ~/.claude-replay/sessions.db (overridable via CLAUDE_REPLAY_DB env var)

@@ -627,7 +627,86 @@ class TestSearch:
         assert store.search("login") == []
 
 
+class TestSearchFilters:
+    def _seed_two(self):
+        store.get_or_create_session(SESSION_ID, objective="alpha", project_dir="/home/me/projA")
+        store.insert_event(SESSION_ID, "tool_result", tool_name="Bash",
+                           tool_result={"stdout": "widget"})
+        store.update_session(SESSION_ID, status="error", error_msg="rate_limit_error (429)")
+        store.get_or_create_session(SESSION_ID_2, objective="beta", project_dir="/home/me/projB")
+        store.insert_event(SESSION_ID_2, "tool_result", tool_name="Read",
+                           tool_result={"stdout": "widget"})
+        store.update_session(SESSION_ID_2, status="completed", ended_at="2026-06-01T12:00:00Z")
+
+    def test_empty_query_no_filters_returns_nothing(self, fresh_db):
+        self._seed_two()
+        assert store.search("") == []
+
+    def test_filter_only_browse(self, fresh_db):
+        self._seed_two()
+        ids = [h["session"]["id"] for h in store.search("", tool="Bash")]
+        assert ids == [SESSION_ID]
+
+    def test_filter_by_tool(self, fresh_db):
+        self._seed_two()
+        ids = [h["session"]["id"] for h in store.search("widget", tool="Read")]
+        assert ids == [SESSION_ID_2]
+
+    def test_filter_by_cause(self, fresh_db):
+        self._seed_two()
+        ids = [h["session"]["id"] for h in store.search("widget", cause="rate_limit")]
+        assert ids == [SESSION_ID]
+
+    def test_filter_by_project(self, fresh_db):
+        self._seed_two()
+        ids = [h["session"]["id"] for h in store.search("widget", project="projB")]
+        assert ids == [SESSION_ID_2]
+
+    def test_filter_by_since(self, fresh_db):
+        self._seed_two()
+        store.db().execute("UPDATE sessions SET started_at=? WHERE id=?",
+                           ("2020-01-01T00:00:00Z", SESSION_ID))
+        ids = [h["session"]["id"] for h in store.search("widget", since="2025-01-01")]
+        assert SESSION_ID not in ids and SESSION_ID_2 in ids
+
+    def test_filters_combine(self, fresh_db):
+        self._seed_two()
+        # Bash tool AND projB → no session satisfies both.
+        assert store.search("widget", tool="Bash", project="projB") == []
+
+
 # ── Retention / prune (v0.2.0) ────────────────────────────────────────────────
+
+class TestCompare:
+    def _two(self):
+        store.get_or_create_session(SESSION_ID, objective="a", project_dir="/p")
+        store.insert_event(SESSION_ID, "tool_result", tool_name="Bash",
+                           tool_result={"is_error": True, "error": "x"})
+        store.insert_event(SESSION_ID, "tool_result", tool_name="Edit",
+                           tool_input={"file_path": "shared.py"})
+        store.get_or_create_session(SESSION_ID_2, objective="b", project_dir="/p")
+        store.insert_event(SESSION_ID_2, "tool_result", tool_name="Edit",
+                           tool_input={"file_path": "shared.py"})
+        store.insert_event(SESSION_ID_2, "tool_result", tool_name="Write",
+                           tool_input={"file_path": "only_b.py"})
+
+    def test_missing_returns_none(self, fresh_db):
+        assert store.compare("nope", "nada") is None
+
+    def test_metric_deltas(self, fresh_db):
+        self._two()
+        c = store.compare(SESSION_ID, SESSION_ID_2)
+        assert c["a"]["metrics"]["tool_calls"] == 2
+        assert c["b"]["metrics"]["tool_calls"] == 2
+        assert c["deltas"]["error_count"] == -1  # B has one fewer error than A
+
+    def test_file_diff(self, fresh_db):
+        self._two()
+        c = store.compare(SESSION_ID, SESSION_ID_2)
+        assert c["files"]["both"] == ["shared.py"]
+        assert c["files"]["only_b"] == ["only_b.py"]
+        assert c["files"]["only_a"] == []
+
 
 class TestPrune:
     def _dated_session(self, sid, started, ended=None):

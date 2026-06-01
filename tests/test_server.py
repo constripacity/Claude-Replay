@@ -239,7 +239,12 @@ class TestDispatchTool:
 
     async def test_search_empty_query(self, fresh_db):
         out = await server.dispatch_tool("replay_search", {"query": "  "})
-        assert "non-empty" in out[0].text
+        assert "query or at least one filter" in out[0].text
+
+    async def test_search_filter_only(self, fresh_db):
+        seed("srv-sess-1")  # uses Read + Write tools
+        out = await server.dispatch_tool("replay_search", {"query": "", "tool": "Write"})
+        assert "srv-sess" in out[0].text
 
     async def test_tag_sets_name_and_tags(self, fresh_db):
         seed("srv-sess-1")
@@ -258,13 +263,34 @@ class TestDispatchTool:
 # ── list_tools ────────────────────────────────────────────────────────────────
 
 class TestListTools:
-    async def test_seven_tools(self, fresh_db):
+    async def test_nine_tools(self, fresh_db):
         tools = await server.list_tools()
         names = {t.name for t in tools}
         assert names == {
             "replay_status", "replay_checkpoint", "replay_resume", "replay_sessions",
-            "replay_export", "replay_search", "replay_tag",
+            "replay_export", "replay_search", "replay_tag", "replay_insights", "replay_diff",
         }
+
+    async def test_diff_tool(self, fresh_db):
+        seed("a1")
+        seed("b2")
+        out = await server.dispatch_tool("replay_diff", {"session_a": "a1", "session_b": "b2"})
+        assert "Compare a1" in out[0].text and "tool calls" in out[0].text
+
+    async def test_diff_missing(self, fresh_db):
+        out = await server.dispatch_tool("replay_diff", {"session_a": "x", "session_b": "y"})
+        assert "not found" in out[0].text
+
+    async def test_insights_tool(self, fresh_db):
+        seed("srv-sess-1")
+        out = await server.dispatch_tool("replay_insights", {"session_id": "srv-sess-1"})
+        text = out[0].text
+        assert "Insights for srv-sess" in text
+        assert "Tool calls:" in text
+
+    async def test_insights_unknown_session(self, fresh_db):
+        out = await server.dispatch_tool("replay_insights", {"session_id": "ghost"})
+        assert "no session" in out[0].text
 
 
 # ── stdio transport ───────────────────────────────────────────────────────────
@@ -294,6 +320,28 @@ class TestApiSearch:
         store.set_tags("s1", ["release"])
         d = client.get("/api/search", params={"q": "release"}).json()
         assert d["results"][0]["session"]["tags"] == ["release"]
+
+
+class TestApiSessionMetrics:
+    def test_detail_includes_metrics(self, client):
+        seed("s1")
+        d = client.get("/api/session/s1").json()
+        assert "metrics" in d
+        assert d["metrics"]["tool_calls"] == 2  # seed writes 2 tool_result events
+        assert "duration_human" in d["metrics"]
+
+
+class TestApiDiff:
+    def test_diff(self, client):
+        seed("a1")
+        seed("b2")
+        d = client.get("/api/diff", params={"a": "a1", "b": "b2"}).json()
+        assert d["a"]["session"]["id"] == "a1"
+        assert "deltas" in d and "files" in d
+
+    def test_diff_missing(self, client):
+        r = client.get("/api/diff", params={"a": "x", "b": "y"})
+        assert r.status_code == 404
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

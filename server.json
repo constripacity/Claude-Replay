@@ -6,13 +6,13 @@
     "url": "https://github.com/constripacity/Claude-Replay",
     "source": "github"
   },
-  "version": "0.2.0",
+  "version": "0.3.0",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "claude-replay",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "runtimeHint": "uvx",
       "runtimeArguments": [
         {

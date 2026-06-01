@@ -88,6 +88,22 @@ def classify(session: dict[str, Any], events: list[dict[str, Any]]) -> dict[str,
     return _result("interrupted", last_error(events))
 
 
+def event_is_error(event: dict[str, Any]) -> bool:
+    """Whether a single event represents a tool/agent error. Strict — used for
+    counting, so a normal result with incidental stderr does NOT count. True
+    only on an explicit `error_msg`, `is_error: true`, or a top-level `error`."""
+    if event.get("error_msg"):
+        return True
+    raw = event.get("tool_result")
+    if not raw:
+        return False
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return False
+    return isinstance(data, dict) and (data.get("is_error") is True or bool(data.get("error")))
+
+
 def last_error(events: list[dict[str, Any]]) -> str | None:
     """Best human string for the most recent recorded error, or None.
 

@@ -2,7 +2,7 @@
 
 <!-- mcp-name: io.github.constripacity/claude-replay -->
 
-**Session checkpoint and recovery for Claude Code.**
+**The observability layer for Claude Code sessions — search, analytics, and visualization across every project.**
 
 [![PyPI](https://img.shields.io/pypi/v/claude-replay?cacheSeconds=3600)](https://pypi.org/project/claude-replay/)
 [![CI](https://github.com/constripacity/Claude-Replay/actions/workflows/ci.yml/badge.svg)](https://github.com/constripacity/Claude-Replay/actions/workflows/ci.yml)
@@ -12,7 +12,7 @@
 
 ---
 
-API errors, rate limits, and context overflow kill Claude Code sessions silently and everything you were mid-way through goes with them. Claude Replay hooks passively into every session, records what happened to a local SQLite store, and lets you **resume from a structured briefing with one command**.
+Claude Code's `--resume`/`--continue` and `/rewind` recover *the session you're in*. Claude Replay does the part they don't: it hooks passively into every session, records what happened to a local SQLite store, and makes **every past session — across every project — searchable, comparable, measurable, and exportable**. Full-text search, per-session insight metrics, death-cause classification (*why* a session ended), session diffing, a web dashboard, and a terminal UI — none of which Claude Code has natively.
 
 ```
 Claude Code session
@@ -29,6 +29,24 @@ Claude Code session
 ```
 
 Passive hooks write. MCP tools, the web dashboard, and the terminal UI read. Nothing leaves your machine.
+
+---
+
+## How this complements native Claude Code
+
+Claude Replay is **additive** — it layers on top of the built-ins, it doesn't replace them.
+
+| You want to… | Use |
+|---|---|
+| Resume / continue the current session | **Native** `claude --continue`, `--resume` |
+| Undo file + conversation changes in a session | **Native** `/rewind` |
+| Search every past session by content, tool, or outcome | **Replay** `search` |
+| See *why* a session ended + per-session metrics | **Replay** `status` / `replay_insights` |
+| Compare two runs side by side | **Replay** `diff` |
+| Visualize a session timeline / browse all projects | **Replay** dashboard + TUI |
+| Export a session as HTML / JSON / Markdown | **Replay** `export --format` |
+
+Think of native resume/rewind as *recovery*, and Replay as *observability* over your whole history.
 
 ---
 
@@ -151,7 +169,7 @@ Paste the `resume` output into a fresh Claude Code session and it picks up where
 
 ## MCP Tools
 
-Every connected Claude Code session gets these seven tools:
+Every connected Claude Code session gets these nine tools:
 
 | Tool | Description |
 |------|-------------|
@@ -159,9 +177,11 @@ Every connected Claude Code session gets these seven tools:
 | `replay_checkpoint` | Force a checkpoint of the current session now, with an optional note |
 | `replay_resume` | Generate a structured resume brief for a session (default: most recent) |
 | `replay_sessions` | List recent sessions with status, model, duration, checkpoint count |
-| `replay_export` | Render a session as a self-contained HTML trace and return the path |
-| `replay_search` | Full-text search across sessions (event payloads, objective, name, tags), ranked by match count |
+| `replay_insights` | Per-session metrics: how it ended, duration, tool calls, error rate, files touched, top tools |
+| `replay_search` | Full-text search across sessions with filters (tool, cause, date, project), ranked by match count |
+| `replay_diff` | Compare two sessions: metric deltas + which files each touched |
 | `replay_tag` | Name a session and add/remove tags for later retrieval |
+| `replay_export` | Render a session as a self-contained trace (html / json / md) and return the path |
 
 ---
 
@@ -171,11 +191,12 @@ Every connected Claude Code session gets these seven tools:
 |---------|--------------|
 | `claude-replay install` | Merge Replay's hooks into `~/.claude/settings.json` (idempotent) |
 | `claude-replay uninstall` | Remove only Replay's hooks |
-| `claude-replay status` | Show the current/last session at a glance |
+| `claude-replay status` | Current/last session at a glance, with insight metrics |
 | `claude-replay sessions [--limit N]` | List recent sessions (with names + tags) |
-| `claude-replay search <query> [--limit N]` | Full-text search across sessions, ranked by match count |
+| `claude-replay search <query> [--tool T] [--cause C] [--since 7d] [--project P]` | Full-text search with filters (omit query to browse by filter) |
+| `claude-replay diff <session-a> <session-b>` | Compare two sessions side by side |
 | `claude-replay resume [session_id]` | Print a resume brief (default: most recent) |
-| `claude-replay export [session_id] [--output DIR]` | Render an HTML trace |
+| `claude-replay export [session_id] [--output DIR] [--format html\|json\|md]` | Render a trace |
 | `claude-replay tag [session_id] [--name N] [--add a,b] [--remove c] [--clear]` | Name or tag a session |
 | `claude-replay prune [--older-than 30d] [--yes]` | Delete sessions with no recent activity (destructive) |
 | `claude-replay serve [--host H] [--port P]` | Start the MCP + dashboard server (port 8766) |

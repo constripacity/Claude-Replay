@@ -25,6 +25,42 @@ def seed(sid=SID):
     return sid
 
 
+# ── JSON / Markdown formats (v0.3.0) ──────────────────────────────────────────
+
+class TestFormats:
+    def test_dispatch_html(self, fresh_db, tmp_path):
+        seed()
+        path = export.render(SID, tmp_path, "html")
+        assert path.suffix == ".html" and path.exists()
+
+    def test_json_export(self, fresh_db, tmp_path):
+        import json
+        seed()
+        path = export.render(SID, tmp_path, "json")
+        assert path.suffix == ".json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert data["session"]["id"] == SID
+        assert len(data["events"]) == 3
+        assert data["metrics"]["tool_calls"] == 2
+        assert data["files"] == ["b.py"]
+        assert "brief" in data
+
+    def test_markdown_export(self, fresh_db, tmp_path):
+        seed()
+        path = export.render(SID, tmp_path, "md")
+        assert path.suffix == ".md"
+        text = path.read_text(encoding="utf-8")
+        assert "# Claude Replay" in text
+        assert "## Timeline" in text
+        assert "## Resume brief" in text
+        assert "b.py" in text
+
+    def test_unknown_format_raises(self, fresh_db, tmp_path):
+        seed()
+        with pytest.raises(ValueError):
+            export.render(SID, tmp_path, "pdf")
+
+
 # ── Basic render ──────────────────────────────────────────────────────────────
 
 class TestRender:

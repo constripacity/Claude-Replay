@@ -4,6 +4,29 @@ All notable changes to Claude Replay are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-06-01
+
+Observability & insight — leaning into what native Claude Code doesn't do.
+Repositioned as the observability layer *on top of* native resume/rewind.
+
+### Added
+
+- **Per-session insight metrics** (`metrics.py`) — pure, DB-free per-session stats:
+  duration, tool-call count, error count/rate, files touched, and the most-used
+  tools, composing the death cause. Surfaced in `status`, the dashboard detail
+  pane, the TUI inspector, the `/api/session` payload, and a new `replay_insights`
+  MCP tool.
+- **Search filters + project grouping** — `claude-replay search` (and the
+  `replay_search` MCP tool / `/api/search`) gain `--tool`, `--cause`, `--since`,
+  `--until`, `--project` filters and browse-by-filter with no query. The dashboard
+  and TUI now group sessions by project.
+- **Session diff / compare** — `store.compare()`, `claude-replay diff <a> <b>`,
+  a `replay_diff` MCP tool, an `/api/diff` endpoint, and a dashboard compare view:
+  metric deltas (tool calls, errors, duration, files) + which files each touched.
+- **Structured export** — `export --format json|md|html` (and the `replay_export`
+  format arg) render JSON and Markdown alongside HTML, for portability into
+  external tooling. MCP tools now number **nine**.
+
 ## [0.2.0] — 2026-06-01
 
 ### Added
@@ -64,5 +87,6 @@ five MCP tools, a web dashboard, and a terminal UI read it back.
 - **MCP tools** — `replay_status`, `replay_checkpoint`, `replay_resume`,
   `replay_sessions`, `replay_export`.
 
+[0.3.0]: https://github.com/constripacity/Claude-Replay/releases/tag/v0.3.0
 [0.2.0]: https://github.com/constripacity/Claude-Replay/releases/tag/v0.2.0
 [0.1.0]: https://github.com/constripacity/Claude-Replay/releases/tag/v0.1.0

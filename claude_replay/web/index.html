@@ -40,6 +40,7 @@
   .search input { background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 3px; padding: 4px 10px; font-family: var(--mono); font-size: 12px; width: 220px; }
   .search input:focus { outline: none; border-color: var(--accent); }
   .matchcount { color: var(--green); }
+  .group { padding: 8px 16px 4px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; }
   pre.snippet { margin: 4px 0 0; padding: 4px 8px; background: #0a0d13; border: 1px solid var(--line); border-radius: 3px; white-space: pre-wrap; word-break: break-word; color: var(--muted); font-size: 11px; }
   h2 { font-size: 13px; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; margin: 24px 0 10px; }
   dl.meta { display: grid; grid-template-columns: 130px 1fr; gap: 3px 14px; margin: 0 0 8px; }
@@ -73,7 +74,7 @@
 </div>
 <div class="toast" id="toast"></div>
 <script>
-  var state = { sessions: [], active: null, query: "", results: [] };
+  var state = { sessions: [], active: null, query: "", results: [], compareA: null };
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
@@ -135,8 +136,24 @@
       return;
     }
     if (!state.sessions.length) { el.innerHTML = '<div class="empty">No sessions recorded yet.</div>'; return; }
-    el.innerHTML = state.sessions.map(function (s) { return sessionRow(s); }).join("");
+    // Group by project_dir, preserving the (recency-sorted) order of first appearance.
+    var groups = [], byPath = {};
+    state.sessions.forEach(function (s) {
+      var p = s.project_dir || "(no project)";
+      if (!byPath[p]) { byPath[p] = []; groups.push(p); }
+      byPath[p].push(s);
+    });
+    el.innerHTML = groups.map(function (p) {
+      return '<div class="group" title="' + esc(p) + '">' + esc(shortProject(p)) + "</div>" +
+        byPath[p].map(function (s) { return sessionRow(s); }).join("");
+    }).join("");
     bindRows(el);
+  }
+
+  function shortProject(path) {
+    if (!path || path === "(no project)") return "(no project)";
+    var parts = String(path).replace(/[\\/]+$/, "").split(/[\\/]/);
+    return parts[parts.length - 1] || path;
   }
 
   function doSearch(q) {
@@ -150,9 +167,49 @@
   }
 
   function select(id) {
+    // If a compare is armed and a different session is clicked, diff them.
+    if (state.compareA && state.compareA !== id) {
+      var a = state.compareA; state.compareA = null;
+      state.active = id; renderList();
+      fetch("/api/diff?a=" + encodeURIComponent(a) + "&b=" + encodeURIComponent(id))
+        .then(function (r) { return r.json(); }).then(renderDiff);
+      return;
+    }
     state.active = id;
     renderList();
     fetch("/api/session/" + encodeURIComponent(id)).then(function (r) { return r.json(); }).then(renderDetail);
+  }
+
+  function startCompare(id) {
+    state.compareA = id;
+    toast("Compare armed — click another session");
+  }
+
+  function renderDiff(d) {
+    if (d.error) { document.getElementById("detail").innerHTML = '<div class="empty">' + esc(d.error) + "</div>"; return; }
+    var am = d.a.metrics, bm = d.b.metrics;
+    function rowm(label, key, human) {
+      var av = human ? am[human] : am[key], bv = human ? bm[human] : bm[key];
+      var delta = d.deltas[key];
+      var ds = delta ? '  <span class="matchcount">(Δ ' + (delta > 0 ? "+" : "") + delta + ")</span>" : "";
+      return "<dt>" + esc(label) + "</dt><dd>" + esc(av) + "  →  " + esc(bv) + ds + "</dd>";
+    }
+    var fileLines = "";
+    if (d.files.only_a.length) fileLines += "<dt>only in A</dt><dd>" + esc(d.files.only_a.join(", ")) + "</dd>";
+    if (d.files.only_b.length) fileLines += "<dt>only in B</dt><dd>" + esc(d.files.only_b.join(", ")) + "</dd>";
+    if (d.files.both.length) fileLines += "<dt>in both</dt><dd>" + esc(d.files.both.join(", ")) + "</dd>";
+    document.getElementById("detail").innerHTML =
+      "<h2>Compare</h2>" +
+      '<dl class="meta">' +
+        "<dt>A</dt><dd>" + esc(d.a.session.id_short || d.a.session.id) + "  " + esc(d.a.session.name || d.a.session.objective || "") + "</dd>" +
+        "<dt>B</dt><dd>" + esc(d.b.session.id_short || d.b.session.id) + "  " + esc(d.b.session.name || d.b.session.objective || "") + "</dd>" +
+        "<dt>how it ended</dt><dd>" + esc(am.death_label) + "  →  " + esc(bm.death_label) + "</dd>" +
+        rowm("duration", "duration_seconds", "duration_human") +
+        rowm("tool calls", "tool_calls") +
+        rowm("errors", "error_count") +
+        rowm("files touched", "files_touched") +
+        fileLines +
+      "</dl>";
   }
 
   function renderDetail(data) {
@@ -195,11 +252,28 @@
         esc(o.timestamp) + '</span><div><span class="tname">' + name + "</span>" + p + "</div></div>";
     }).join("");
 
+    var m = data.metrics;
+    var insightsHtml = "";
+    if (m) {
+      var topTools = (m.top_tools || []).map(function (t) { return esc(t[0]) + "×" + t[1]; }).join("  ");
+      var insights = [
+        ["Duration", m.duration_human],
+        ["Tool calls", m.tool_calls + (m.error_count ? "  (" + m.error_count + " err, " + Math.round(m.error_rate * 100) + "%)" : "")],
+        ["Files touched", m.files_touched],
+      ];
+      if (topTools) insights.push(["Top tools", topTools]);
+      insightsHtml = "<h2>Insights</h2><dl class=\"meta\">" +
+        insights.map(function (kv) { return "<dt>" + esc(kv[0]) + "</dt><dd>" + esc(kv[1]) + "</dd>"; }).join("") +
+        "</dl>";
+    }
+
     document.getElementById("detail").innerHTML =
       "<h2>" + badge(s.status) + "&nbsp; Session detail</h2>" +
       '<div class="actions"><button onclick="copyBrief(\'' + esc(s.id) + '\')">Copy Resume Brief</button>' +
-      '<button onclick="exportHtml(\'' + esc(s.id) + '\')">Export HTML</button></div>' +
+      '<button onclick="exportHtml(\'' + esc(s.id) + '\')">Export HTML</button>' +
+      '<button onclick="startCompare(\'' + esc(s.id) + '\')">Compare ▾</button></div>' +
       '<dl class="meta">' + metaHtml + "</dl>" +
+      insightsHtml +
       "<h2>Timeline</h2>" + (timeline || '<div class="empty">No events.</div>');
   }
 
