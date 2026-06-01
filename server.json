@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.constripacity/claude-replay",
-  "description": "Session checkpoint and recovery layer for Claude Code — records every session to local SQLite and exposes resume, search, tag, and export tools.",
+  "description": "Session checkpoint & recovery for Claude Code: resume, search, tag, and export recorded sessions.",
   "repository": {
     "url": "https://github.com/constripacity/Claude-Replay",
     "source": "github"
