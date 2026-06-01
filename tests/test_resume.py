@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+
 import claude_replay.resume as resume
 import claude_replay.store as store
 
@@ -153,3 +155,71 @@ class TestStatusVariants:
         events = store.list_events(SID)
         out = resume.generate_brief(SID)
         assert events[-1]["timestamp"] in out
+
+
+# ── Death-cause line (v0.2.0) ─────────────────────────────────────────────────
+
+class TestDeathCause:
+    def test_clean_finish_shown(self, fresh_db):
+        store.get_or_create_session(SID, objective="x")
+        store.update_session(SID, status="completed", ended_at="2026-05-30T12:00:00Z")
+        assert "**How it ended:** Clean finish" in resume.generate_brief(SID)
+
+    def test_interrupted_shown(self, fresh_db):
+        seed_full()  # status defaults to 'running' with events
+        assert "**How it ended:** Interrupted" in resume.generate_brief(SID)
+
+    def test_rate_limit_with_detail(self, fresh_db):
+        store.get_or_create_session(SID, objective="x")
+        store.update_session(SID, status="error", error_msg="rate_limit_error (429)")
+        out = resume.generate_brief(SID)
+        assert "**How it ended:** Rate limited" in out
+        assert "**Last error:** rate_limit_error (429)" in out
+
+
+# ── Live repository state (v0.2.0) ────────────────────────────────────────────
+
+class TestRepoState:
+    def test_no_section_for_non_git_dir(self, fresh_db):
+        seed_full()  # project_dir="/proj" — not a repo
+        assert "### Repository state" not in resume.generate_brief(SID)
+
+    def test_branch_and_uncommitted_shown(self, fresh_db, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        def run(*a):
+            return subprocess.run(["git", "-C", str(repo), *a], capture_output=True)
+
+        run("init", "-b", "work")
+        run("config", "user.email", "t@t.t")
+        run("config", "user.name", "t")
+        (repo / "committed.txt").write_text("v1")
+        run("add", "-A")
+        run("commit", "-m", "init")
+        (repo / "dirty.txt").write_text("uncommitted")  # untracked → shows in porcelain
+
+        store.get_or_create_session(SID, project_dir=str(repo), objective="x")
+        store.insert_event(SID, "tool_result", tool_name="Read")
+        out = resume.generate_brief(SID)
+        assert "### Repository state (live)" in out
+        assert "**Branch:** work" in out
+        assert "dirty.txt" in out
+
+    def test_clean_tree_message(self, fresh_db, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        def run(*a):
+            return subprocess.run(["git", "-C", str(repo), *a], capture_output=True)
+
+        run("init", "-b", "main")
+        run("config", "user.email", "t@t.t")
+        run("config", "user.name", "t")
+        (repo / "a.txt").write_text("v1")
+        run("add", "-A")
+        run("commit", "-m", "init")
+
+        store.get_or_create_session(SID, project_dir=str(repo), objective="x")
+        out = resume.generate_brief(SID)
+        assert "(clean working tree)" in out

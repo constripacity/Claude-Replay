@@ -244,11 +244,16 @@ def cmd_status() -> int:
     if sid is None:
         print("No sessions recorded yet.")
         return 0
+    from . import classify
+
     data = store.get_resume_data(sid)
     s = data["session"]
+    death = classify.classify(s, store.list_events(sid))
     print(f"Session:     {s['id']}")
     print(f"Objective:   {s['objective'] or '(not recorded)'}")
     print(f"Status:      {s['status']}")
+    print(f"How it ended: {death['label']}"
+          + (f"  ({death['detail']})" if death['detail'] else ""))
     print(f"Model:       {s['model'] or '(unknown)'}")
     print(f"Project:     {s['project_dir'] or '—'}")
     print(f"Started:     {s['started_at']}")

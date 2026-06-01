@@ -99,11 +99,16 @@ async def _manual_checkpoint(session_id: str, note: str | None) -> int:
 
 
 def _session_summary(s: dict[str, Any]) -> dict[str, Any]:
+    from . import classify
+
+    death = classify.classify(s, store.list_events(s["id"]))
     return {
         "id": s["id"],
         "id_short": s["id"][:8],
         "objective": s["objective"],
         "status": s["status"],
+        "death_cause": death["cause"],
+        "death_label": death["label"],
         "model": s["model"],
         "project_dir": s["project_dir"],
         "started_at": s["started_at"],
@@ -182,13 +187,17 @@ async def dispatch_tool(name: str, arguments: dict[str, Any]) -> list[TextConten
         sid = _latest_session_id()
         if sid is None:
             return [TextContent(type="text", text="No sessions recorded yet.")]
+        from . import classify
+
         data = store.get_resume_data(sid)
         s = data["session"]
+        death = classify.classify(s, store.list_events(sid))
         text = (
             f"✓ Claude Replay — current session\n"
             f"  Session:     {s['id']}\n"
             f"  Objective:   {s['objective'] or '(not recorded)'}\n"
             f"  Status:      {s['status']}\n"
+            f"  How it ended:{' ' + death['label']}\n"
             f"  Model:       {s['model'] or '(unknown)'}\n"
             f"  Events:      {data['event_count']}\n"
             f"  Checkpoints: {data['checkpoint_count']}\n"

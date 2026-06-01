@@ -7,9 +7,11 @@ Claude Code session to continue exactly where the dead one left off.
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
 from typing import Any
 
-from . import store
+from . import classify, store
 
 HEADER = "## Claude Replay — Session Resume Brief"
 FOOTER = 'Resume from "Pending work" above. All file state is current on disk.'
@@ -42,6 +44,13 @@ def generate_brief(session_id: str) -> str:
     if session["error_msg"]:
         model_line += f"  |  **Error:** {session['error_msg']}"
     lines.append(model_line)
+
+    # Why the session ended — clean finish vs rate limit vs context overflow, etc.
+    death = classify.classify(session, events)
+    death_line = f"**How it ended:** {death['label']}"
+    if death["detail"]:
+        death_line += f"  |  **Last error:** {death['detail']}"
+    lines.append(death_line)
 
     lines.append(
         f"**Checkpoints recorded:** {data['checkpoint_count']}  |  "
@@ -80,9 +89,50 @@ def generate_brief(session_id: str) -> str:
         lines.append("```")
         lines.append("")
 
+    # Live repository state — current branch + what's uncommitted RIGHT NOW in
+    # the project dir. Computed at brief time (not death time) so the restart
+    # reflects the tree you're actually resuming into.
+    repo = _git_context(session["project_dir"])
+    if repo:
+        lines.append("### Repository state (live)")
+        lines.append(f"**Branch:** {repo['branch']}")
+        if repo["uncommitted"]:
+            lines.append("**Uncommitted changes:**")
+            lines.extend(f"- {entry}" for entry in repo["uncommitted"])
+        else:
+            lines.append("**Uncommitted changes:** (clean working tree)")
+        lines.append("")
+
     lines.append("---")
     lines.append(FOOTER)
     return "\n".join(lines)
+
+
+def _git_context(project_dir: str | None) -> dict[str, Any] | None:
+    """Current branch + porcelain status for `project_dir`. Best-effort and
+    offline: returns None if it's not a git repo, git is missing, or anything
+    fails — the brief never depends on git being present."""
+    if not project_dir or not (Path(project_dir) / ".git").exists():
+        return None
+    try:
+        branch = _git(project_dir, "rev-parse", "--abbrev-ref", "HEAD")
+        status = _git(project_dir, "status", "--porcelain")
+    except Exception:
+        return None
+    if branch is None:
+        return None
+    uncommitted = [line.strip() for line in (status or "").splitlines() if line.strip()]
+    return {"branch": branch.strip() or "(detached)", "uncommitted": uncommitted[:50]}
+
+
+def _git(project_dir: str, *args: str) -> str | None:
+    result = subprocess.run(
+        ["git", "-C", project_dir, *args],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    return result.stdout if result.returncode == 0 else None
 
 
 def _files_for(checkpoint: dict[str, Any] | None, session_id: str) -> list[str]:
