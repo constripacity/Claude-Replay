@@ -31,3 +31,6 @@ Claude-Replay-Build-Plan.md
 .venv/
 venv/
 env/
+
+# MCP registry CLI (downloaded tool, not source)
+mcp-publisher.exe
