@@ -360,6 +360,12 @@ def list_events(session_id: str) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+def count_sessions() -> int:
+    """Total number of recorded sessions. Used by `doctor`."""
+    row = db().execute("SELECT COUNT(*) FROM sessions").fetchone()
+    return row[0]
+
+
 def count_events(session_id: str, event_type: str | None = None) -> int:
     if event_type:
         row = db().execute(

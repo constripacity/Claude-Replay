@@ -27,6 +27,7 @@ visualize SQLite. Nothing else.
 - claude_replay/resume.py     — resume brief generation (death cause + live git state)
 - claude_replay/classify.py   — death-cause classification (pure, no DB access)
 - claude_replay/metrics.py    — per-session insight metrics (pure, no DB access)
+- claude_replay/doctor.py     — `doctor` self-check (pure evaluate(); CLI gathers facts)
 - claude_replay/export.py     — trace rendering (html / json / md)
 - claude_replay/server.py     — Starlette app (MCP SSE + JSON API + static)
 - claude_replay/tui_client.py — async httpx client over the JSON API (testable, no Textual)
@@ -34,8 +35,8 @@ visualize SQLite. Nothing else.
 - claude_replay/cli.py        — all CLI subcommands
 
 ## CLI subcommands
-install · uninstall · hook <pre-tool|post-tool|stop> · status · sessions ·
-search · diff · resume · export · tag · prune · serve · mcp · tui · reset
+install · uninstall · hook <pre-tool|post-tool|stop> · status · doctor ·
+sessions · search · diff · resume · export · tag · prune · serve · mcp · tui · reset
 
 ## DB location
 ~/.claude-replay/sessions.db (overridable via CLAUDE_REPLAY_DB env var)

@@ -105,6 +105,25 @@ claude-replay install
 
 From now on, every Claude Code session is recorded automatically. Remove the hooks any time with `claude-replay uninstall` (it removes only Replay's hooks).
 
+Confirm it's actually wired up — the one check that matters:
+
+```bash
+claude-replay doctor
+```
+
+```
+Claude Replay — doctor
+
+  ✓ Hooks installed: PreToolUse / PostToolUse / Stop are in settings.json
+  ✓ Hook command on PATH: claude-replay → …/claude-replay
+  ✓ Database: ~/.claude-replay/sessions.db
+  ✓ Sessions recorded: 3 sessions; most recent 5m ago
+
+All good — Replay is installed and recording. ✓
+```
+
+If `doctor` warns that `claude-replay` isn't on PATH, the hooks can't run and nothing is recorded — put your install directory on PATH and re-run it.
+
 ### 3. Start the server (dashboard + MCP tools)
 
 ```bash

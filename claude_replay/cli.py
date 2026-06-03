@@ -147,6 +147,14 @@ def cmd_install(path: str) -> int:
     print("  PreToolUse  → claude-replay hook pre-tool")
     print("  PostToolUse → claude-replay hook post-tool")
     print("  Stop        → claude-replay hook stop")
+    import shutil
+
+    if shutil.which("claude-replay") is None:
+        print()
+        print("  ! Warning: 'claude-replay' is not on your PATH.")
+        print("    Claude Code runs the hooks as 'claude-replay hook …'; if it can't")
+        print("    find that command, the hooks fail silently and nothing is recorded.")
+        print("    Put your install dir on PATH, then verify with:  claude-replay doctor")
     return 0
 
 
@@ -410,6 +418,38 @@ def cmd_status() -> int:
     return 0
 
 
+def _age_hours(started: str | None) -> float | None:
+    """Hours since an ISO-Zulu timestamp, or None if unparseable."""
+    if not started:
+        return None
+    try:
+        a = datetime.fromisoformat(started.replace("Z", "+00:00"))
+        return max(0.0, (datetime.now(timezone.utc) - a).total_seconds() / 3600)
+    except ValueError:
+        return None
+
+
+def cmd_doctor() -> int:
+    """Self-check: is Replay installed and actually recording?"""
+    import shutil
+
+    from . import doctor
+
+    settings = _read_settings(settings_path())
+    recent = store.list_sessions(1)
+    last_age = _age_hours(recent[0]["started_at"]) if recent else None
+    result = doctor.evaluate(
+        hooks_installed=is_installed(settings),
+        command_on_path=shutil.which("claude-replay"),
+        db_path=store.DB_PATH,
+        db_exists=os.path.exists(store.DB_PATH),
+        session_count=store.count_sessions(),
+        last_session_age_hours=last_age,
+    )
+    print(doctor.render(result))
+    return 0 if result["ok"] else 1
+
+
 def cmd_serve(host: str, port: int) -> int:
     import uvicorn
 
@@ -524,6 +564,8 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("status", help="Show the current/last session status")
 
+    sub.add_parser("doctor", help="Self-check: is Replay installed and actually recording?")
+
     serve_p = sub.add_parser("serve", help="Start the MCP + dashboard server (port 8766)")
     serve_p.add_argument("--host", default="127.0.0.1", help="Interface to bind (default: 127.0.0.1)")
     serve_p.add_argument("--port", type=int, default=8766, help="Port to listen on (default: 8766)")
@@ -568,6 +610,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_tag(args.session_id, args.name, args.add, args.remove, args.clear)
     if args.command == "status":
         return cmd_status()
+    if args.command == "doctor":
+        return cmd_doctor()
     if args.command == "serve":
         return cmd_serve(args.host, args.port)
     if args.command == "mcp":

@@ -4,6 +4,21 @@ All notable changes to Claude Replay are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`claude-replay doctor`** — a self-check that answers the one question that
+  matters after install: *is Replay actually recording?* It verifies the hooks
+  are in `settings.json`, that the `claude-replay` command is resolvable on PATH
+  (the most common silent failure — Claude Code can't run a hook it can't find,
+  and hooks swallow their own errors by design), that the database exists, and
+  that sessions are being recorded. Exits non-zero when something's wrong, so it
+  is scriptable. Backed by a pure `doctor.evaluate()` and `store.count_sessions()`.
+- **Install-time PATH warning** — `claude-replay install` now warns if
+  `claude-replay` is not on PATH, pointing at `doctor`, so a broken setup is
+  caught at install time instead of discovered as an empty dashboard later.
+
 ## [0.3.0] — 2026-06-01
 
 Observability & insight — leaning into what native Claude Code doesn't do.
