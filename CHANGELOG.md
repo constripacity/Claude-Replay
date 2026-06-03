@@ -8,6 +8,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Cross-session analytics** (`analytics.py`) — a rollup across *all* recorded
+  sessions, the per-developer view native Claude Code doesn't give: total tool
+  calls + average per session, overall error rate, the **death-cause breakdown
+  ("why your sessions end")**, the tool mix, per-project rollups, and a day-by-day
+  activity trend. Surfaced as `claude-replay stats` (with `--limit` / `--project`),
+  a `replay_stats` MCP tool, and an `/api/stats` endpoint. Pure `analytics.aggregate()`
+  + `store.sessions_with_events()`. MCP tools now number **ten**.
 - **`claude-replay doctor`** — a self-check that answers the one question that
   matters after install: *is Replay actually recording?* It verifies the hooks
   are in `settings.json`, that the `claude-replay` command is resolvable on PATH

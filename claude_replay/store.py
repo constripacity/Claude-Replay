@@ -366,6 +366,14 @@ def count_sessions() -> int:
     return row[0]
 
 
+def sessions_with_events(limit: int | None = None) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
+    """Load (session, events) pairs for cross-session analytics. `limit` caps
+    how many recent sessions (None = all). The single data source for the
+    analytics rollup — keeps that module pure and DB-free."""
+    sessions = list_sessions(limit if limit is not None else (count_sessions() or 1))
+    return [(s, list_events(s["id"])) for s in sessions]
+
+
 def count_events(session_id: str, event_type: str | None = None) -> int:
     if event_type:
         row = db().execute(

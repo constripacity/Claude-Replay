@@ -263,12 +263,13 @@ class TestDispatchTool:
 # ── list_tools ────────────────────────────────────────────────────────────────
 
 class TestListTools:
-    async def test_nine_tools(self, fresh_db):
+    async def test_ten_tools(self, fresh_db):
         tools = await server.list_tools()
         names = {t.name for t in tools}
         assert names == {
             "replay_status", "replay_checkpoint", "replay_resume", "replay_sessions",
             "replay_export", "replay_search", "replay_tag", "replay_insights", "replay_diff",
+            "replay_stats",
         }
 
     async def test_diff_tool(self, fresh_db):
@@ -342,6 +343,39 @@ class TestApiDiff:
     def test_diff_missing(self, client):
         r = client.get("/api/diff", params={"a": "x", "b": "y"})
         assert r.status_code == 404
+
+
+class TestApiStats:
+    def test_stats_rollup(self, client):
+        seed("a1", project_dir="/proj/x")
+        seed("b2", project_dir="/proj/y")
+        d = client.get("/api/stats").json()
+        assert d["session_count"] == 2
+        assert d["total_tool_calls"] == 4  # 2 tool_result events per seed
+        assert dict(d["tool_mix"])["Read"] == 2 and dict(d["tool_mix"])["Write"] == 2
+        assert len(d["projects"]) == 2
+
+    def test_stats_empty(self, client):
+        assert client.get("/api/stats").json()["session_count"] == 0
+
+    def test_stats_project_filter(self, client):
+        seed("a1", project_dir="/proj/keep")
+        seed("b2", project_dir="/proj/drop")
+        d = client.get("/api/stats", params={"project": "keep"}).json()
+        assert d["session_count"] == 1
+
+
+class TestStatsTool:
+    async def test_stats(self, fresh_db):
+        seed("a1")
+        out = await server.dispatch_tool("replay_stats", {})
+        text = out[0].text
+        assert "Analytics across 1 session" in text
+        assert "Tool calls:" in text and "Why they end:" in text
+
+    async def test_stats_empty(self, fresh_db):
+        out = await server.dispatch_tool("replay_stats", {})
+        assert "No sessions recorded yet." in out[0].text
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@
 Observability layer for Claude Code sessions — the cross-project search /
 analytics / visualization that complements native resume/rewind (it does NOT
 re-implement them; see the positioning note below). Hooks silently into every
-session, stores events + checkpoints in SQLite, exposes 9 MCP tools. Sibling to
+session, stores events + checkpoints in SQLite, exposes 10 MCP tools. Sibling to
 Claude Bridge under Constripacity.
 
 ## Positioning (load-bearing — read before adding features)
@@ -28,6 +28,7 @@ visualize SQLite. Nothing else.
 - claude_replay/classify.py   — death-cause classification (pure, no DB access)
 - claude_replay/metrics.py    — per-session insight metrics (pure, no DB access)
 - claude_replay/doctor.py     — `doctor` self-check (pure evaluate(); CLI gathers facts)
+- claude_replay/analytics.py  — cross-session rollup (pure aggregate(), no DB access)
 - claude_replay/export.py     — trace rendering (html / json / md)
 - claude_replay/server.py     — Starlette app (MCP SSE + JSON API + static)
 - claude_replay/tui_client.py — async httpx client over the JSON API (testable, no Textual)
@@ -35,7 +36,7 @@ visualize SQLite. Nothing else.
 - claude_replay/cli.py        — all CLI subcommands
 
 ## CLI subcommands
-install · uninstall · hook <pre-tool|post-tool|stop> · status · doctor ·
+install · uninstall · hook <pre-tool|post-tool|stop> · status · doctor · stats ·
 sessions · search · diff · resume · export · tag · prune · serve · mcp · tui · reset
 
 ## DB location

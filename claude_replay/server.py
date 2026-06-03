@@ -3,7 +3,7 @@ Claude Replay — Starlette app: MCP SSE tools + JSON API + static dashboard.
 
 A thin read/write surface over the SQLite store. All persistence lives in
 store.py; this module exposes it several ways:
-  - Nine `replay_*` MCP tools over SSE at /sse (for Claude Code agents)
+  - Ten `replay_*` MCP tools over SSE at /sse (for Claude Code agents)
   - The same tools over stdio via run_stdio (for `uvx claude-replay mcp` / any client)
   - A JSON HTTP API under /api/* (for the dashboard or any client)
   - A static dashboard at / (claude_replay/web/index.html)
@@ -245,6 +245,21 @@ async def list_tools() -> list[Tool]:
                 "required": ["session_a", "session_b"],
             },
         ),
+        Tool(
+            name="replay_stats",
+            description=(
+                "Cross-session analytics across all recorded sessions: total tool calls, "
+                "overall error rate, why sessions end (death-cause breakdown), the tool mix, "
+                "and per-project rollups. Optional limit / project filter."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Only the N most recent sessions (default: all)"},
+                    "project": {"type": "string", "description": "Only sessions whose project dir contains this"},
+                },
+            },
+        ),
     ]
 
 
@@ -384,6 +399,35 @@ async def dispatch_tool(name: str, arguments: dict[str, Any]) -> list[TextConten
         )
         return [TextContent(type="text", text=text)]
 
+    if name == "replay_stats":
+        from . import analytics
+
+        limit = arguments.get("limit")
+        items = store.sessions_with_events(int(limit) if limit else None)
+        project = arguments.get("project")
+        if project:
+            needle = str(project).lower()
+            items = [(s, e) for s, e in items if needle in (s.get("project_dir") or "").lower()]
+        roll = analytics.aggregate(items)
+        if roll["session_count"] == 0:
+            return [TextContent(type="text", text="No sessions recorded yet.")]
+        causes = ", ".join(f"{lbl}×{c}" for lbl, c in roll["death_causes"]) or "—"
+        mix = ", ".join(f"{t}×{c}" for t, c in roll["tool_mix"][:6]) or "—"
+        projects = "; ".join(
+            f"{p['project'].rsplit('/', 1)[-1].rsplit(chr(92), 1)[-1]} "
+            f"({p['sessions']}s, {p['error_rate']:.0%} err)"
+            for p in roll["projects"][:5]
+        ) or "—"
+        text = (
+            f"Analytics across {roll['session_count']} sessions:\n"
+            f"  Tool calls:   {roll['total_tool_calls']}  (avg {roll['avg_tool_calls']}/session)\n"
+            f"  Error rate:   {roll['overall_error_rate']:.0%}\n"
+            f"  Why they end: {causes}\n"
+            f"  Tool mix:     {mix}\n"
+            f"  By project:   {projects}"
+        )
+        return [TextContent(type="text", text=text)]
+
     return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
 
@@ -463,6 +507,22 @@ async def api_diff(request: Request) -> JSONResponse:
     return JSONResponse(cmp)
 
 
+async def api_stats(request: Request) -> JSONResponse:
+    from . import analytics
+
+    qp = request.query_params
+    try:
+        limit = int(qp["limit"]) if qp.get("limit") else None
+    except (TypeError, ValueError):
+        limit = None
+    items = store.sessions_with_events(limit)
+    project = qp.get("project")
+    if project:
+        needle = project.lower()
+        items = [(s, e) for s, e in items if needle in (s.get("project_dir") or "").lower()]
+    return JSONResponse(analytics.aggregate(items))
+
+
 async def api_resume(request: Request) -> JSONResponse:
     sid = request.path_params["session_id"]
     if store.get_session(sid) is None:
@@ -535,6 +595,7 @@ _routes = [
     Route("/api/state", endpoint=api_state),
     Route("/api/search", endpoint=api_search),
     Route("/api/diff", endpoint=api_diff),
+    Route("/api/stats", endpoint=api_stats),
     Route("/api/session/{session_id}", endpoint=api_session),
     Route("/api/resume/{session_id}", endpoint=api_resume),
     Route("/api/export/{session_id}", endpoint=api_export),

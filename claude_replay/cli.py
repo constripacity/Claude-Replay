@@ -450,6 +450,72 @@ def cmd_doctor() -> int:
     return 0 if result["ok"] else 1
 
 
+def cmd_stats(limit: int | None, project: str | None) -> int:
+    """Cross-session analytics: trends, tool mix, per-project rollups, and
+    why your sessions end."""
+    from . import analytics
+
+    items = store.sessions_with_events(limit)
+    if project:
+        needle = project.lower()
+        items = [(s, e) for s, e in items if needle in (s.get("project_dir") or "").lower()]
+    roll = analytics.aggregate(items)
+
+    if roll["session_count"] == 0:
+        print("No sessions recorded yet." if not project else f"No sessions match project '{project}'.")
+        return 0
+
+    scope = f" · project ~ {project}" if project else ""
+    print(f"Claude Replay — analytics across {roll['session_count']} session"
+          f"{'s' if roll['session_count'] != 1 else ''}{scope}")
+    print()
+    print(f"  Tool calls:   {roll['total_tool_calls']}  "
+          f"(avg {roll['avg_tool_calls']}/session)")
+    print(f"  Error rate:   {roll['overall_error_rate']:.0%}")
+    avg = roll["avg_duration_seconds"]
+    print(f"  Avg duration: {_human_secs(avg)}")
+    print()
+
+    print("  Why sessions end:")
+    for label, count in roll["death_causes"]:
+        bar = "█" * count
+        print(f"    {label:18} {count:>3}  {bar}")
+    print()
+
+    if roll["tool_mix"]:
+        mix = ", ".join(f"{t}×{c}" for t, c in roll["tool_mix"][:8])
+        print(f"  Tool mix:     {mix}")
+        print()
+
+    if not project and len(roll["projects"]) > 1:
+        print("  By project:")
+        print(f"    {'PROJECT':32} {'SESS':>4} {'CALLS':>6} {'ERR':>5}  TOP CAUSE")
+        for p in roll["projects"][:10]:
+            name = (p["project"].rsplit("\\", 1)[-1].rsplit("/", 1)[-1] or p["project"])[:32]
+            print(f"    {name:32} {p['sessions']:>4} {p['tool_calls']:>6} "
+                  f"{p['error_rate']:>5.0%}  {p['top_cause']}")
+        print()
+
+    if len(roll["by_day"]) > 1:
+        print("  Recent activity:")
+        for d in roll["by_day"][-7:]:
+            bar = "▁▂▃▄▅▆▇█"[min(7, d["sessions"] - 1)] * d["sessions"]
+            print(f"    {d['day']}  {d['sessions']:>2} session(s)  {bar}")
+    return 0
+
+
+def _human_secs(seconds: int | None) -> str:
+    if seconds is None:
+        return "—"
+    if seconds < 60:
+        return f"{seconds}s"
+    m, s = divmod(seconds, 60)
+    if m < 60:
+        return f"{m}m{s:02d}s"
+    h, m = divmod(m, 60)
+    return f"{h}h{m:02d}m"
+
+
 def cmd_serve(host: str, port: int) -> int:
     import uvicorn
 
@@ -566,6 +632,12 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("doctor", help="Self-check: is Replay installed and actually recording?")
 
+    stats_p = sub.add_parser("stats", help="Cross-session analytics: trends, tool mix, why sessions end")
+    stats_p.add_argument("--limit", type=int, default=None,
+                         help="Only the N most recent sessions (default: all)")
+    stats_p.add_argument("--project", default=None,
+                         help="Only sessions whose project dir contains this")
+
     serve_p = sub.add_parser("serve", help="Start the MCP + dashboard server (port 8766)")
     serve_p.add_argument("--host", default="127.0.0.1", help="Interface to bind (default: 127.0.0.1)")
     serve_p.add_argument("--port", type=int, default=8766, help="Port to listen on (default: 8766)")
@@ -612,6 +684,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_status()
     if args.command == "doctor":
         return cmd_doctor()
+    if args.command == "stats":
+        return cmd_stats(args.limit, args.project)
     if args.command == "serve":
         return cmd_serve(args.host, args.port)
     if args.command == "mcp":

@@ -188,7 +188,7 @@ Paste the `resume` output into a fresh Claude Code session and it picks up where
 
 ## MCP Tools
 
-Every connected Claude Code session gets these nine tools:
+Every connected Claude Code session gets these ten tools:
 
 | Tool | Description |
 |------|-------------|
@@ -197,6 +197,7 @@ Every connected Claude Code session gets these nine tools:
 | `replay_resume` | Generate a structured resume brief for a session (default: most recent) |
 | `replay_sessions` | List recent sessions with status, model, duration, checkpoint count |
 | `replay_insights` | Per-session metrics: how it ended, duration, tool calls, error rate, files touched, top tools |
+| `replay_stats` | Cross-session analytics: tool calls, error rate, why sessions end, tool mix, per-project rollups |
 | `replay_search` | Full-text search across sessions with filters (tool, cause, date, project), ranked by match count |
 | `replay_diff` | Compare two sessions: metric deltas + which files each touched |
 | `replay_tag` | Name a session and add/remove tags for later retrieval |
