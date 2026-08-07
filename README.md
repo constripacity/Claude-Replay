@@ -135,7 +135,7 @@ claude-replay serve --host 0.0.0.0  # bind all interfaces
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Claude Replay — Session checkpoint & recovery server
-  Version: 0.3.0
+  Version: 0.4.1
   DB: ~/.claude-replay/sessions.db
   http://localhost:8766/             ← Dashboard
   http://localhost:8766/sse          ← MCP config

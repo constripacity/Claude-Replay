@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 authors = [{ name = "Constripacity" }]
 keywords = ["mcp", "claude-code", "agent", "replay", "checkpoint", "recovery", "session"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
