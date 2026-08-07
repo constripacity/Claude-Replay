@@ -716,11 +716,20 @@ class TestPrune:
             (started, ended, sid),
         )
 
+    @staticmethod
+    def _recent():
+        # A timestamp well inside the 30-day window, relative to *now* — a
+        # hardcoded "recent" date rots: once real time passes 30 days beyond it
+        # the session is pruned and these assertions flip (which is exactly what
+        # happened to the old literal 2026-05-31).
+        from datetime import datetime, timedelta, timezone
+        return (datetime.now(timezone.utc) - timedelta(days=1)).isoformat().replace("+00:00", "Z")
+
     def test_prunes_old_keeps_recent(self, fresh_db):
         self._dated_session("old", "2020-01-01T00:00:00Z")
         store.insert_event("old", "tool_result", tool_name="Read")
         store.write_checkpoint("old", step_done="done")
-        self._dated_session("fresh", "2026-05-31T00:00:00Z")
+        self._dated_session("fresh", self._recent())
 
         removed = store.prune(older_than_days=30)
 
@@ -732,7 +741,7 @@ class TestPrune:
 
     def test_uses_ended_at_when_present(self, fresh_db):
         # Started long ago but ENDED recently → must be kept.
-        self._dated_session("longrun", "2020-01-01T00:00:00Z", "2026-05-31T00:00:00Z")
+        self._dated_session("longrun", "2020-01-01T00:00:00Z", self._recent())
         assert store.prune(older_than_days=30) == 0
         assert store.get_session("longrun") is not None
 

@@ -4,6 +4,25 @@ All notable changes to Claude Replay are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] — 2026-08-08
+
+Dependency-hardening patch. No feature or API changes.
+
+### Fixed
+
+- **Capped `mcp<2` so the package still installs and runs.** `mcp` was declared
+  `mcp>=1.0.0` with no upper bound; once `mcp 2.0` shipped it removed the
+  low-level `@server.list_tools()` / `@server.call_tool()` decorator API the
+  server is built on, so a fresh `pip install claude-replay` (or
+  `uvx claude-replay mcp`) resolved `mcp 2.0` and crashed on import. The cap pins
+  the 1.x API.
+- Upper-bounded every other runtime, TUI, and dev dependency below its next
+  major, so an unpinned upgrade can no longer break a released line or turn CI
+  red on unchanged code.
+- Pinned the ruff lint rule set (`[tool.ruff.lint] select = E4/E7/E9/F`, ruff's
+  historical default) — ruff 0.16 broadened its defaults and would otherwise
+  fail `ruff check .` on unchanged code.
+
 ## [0.4.0] — 2026-06-03
 
 Reliability + cross-session insight — the first release recorded against real
@@ -112,6 +131,8 @@ five MCP tools, a web dashboard, and a terminal UI read it back.
 - **MCP tools** — `replay_status`, `replay_checkpoint`, `replay_resume`,
   `replay_sessions`, `replay_export`.
 
+[0.4.1]: https://github.com/constripacity/Claude-Replay/releases/tag/v0.4.1
+[0.4.0]: https://github.com/constripacity/Claude-Replay/releases/tag/v0.4.0
 [0.3.0]: https://github.com/constripacity/Claude-Replay/releases/tag/v0.3.0
 [0.2.0]: https://github.com/constripacity/Claude-Replay/releases/tag/v0.2.0
 [0.1.0]: https://github.com/constripacity/Claude-Replay/releases/tag/v0.1.0
