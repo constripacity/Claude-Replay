@@ -4,6 +4,20 @@ All notable changes to Claude Replay are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] — 2026-08-17
+
+Registry/packaging fix so `uvx` — and MCP directories (e.g. Glama) that
+auto-launch via `uvx` — can install and run the stdio server. No functional
+change.
+
+### Fixed
+
+- **MCP Registry launch config:** the `mcp` subcommand moved from
+  `runtimeArguments` (flags for `uvx` itself) to `packageArguments` (args for the
+  program), so the registry entry launches `uvx claude-replay mcp` correctly
+  instead of the invalid `uvx mcp claude-replay` — unblocking directory
+  auto-installers that reported "cannot be installed."
+
 ## [0.4.1] — 2026-08-08
 
 Dependency-hardening patch. No feature or API changes.
@@ -131,6 +145,7 @@ five MCP tools, a web dashboard, and a terminal UI read it back.
 - **MCP tools** — `replay_status`, `replay_checkpoint`, `replay_resume`,
   `replay_sessions`, `replay_export`.
 
+[0.4.2]: https://github.com/constripacity/Claude-Replay/releases/tag/v0.4.2
 [0.4.1]: https://github.com/constripacity/Claude-Replay/releases/tag/v0.4.1
 [0.4.0]: https://github.com/constripacity/Claude-Replay/releases/tag/v0.4.0
 [0.3.0]: https://github.com/constripacity/Claude-Replay/releases/tag/v0.3.0
