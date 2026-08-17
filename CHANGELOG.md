@@ -17,6 +17,9 @@ change.
   program), so the registry entry launches `uvx claude-replay mcp` correctly
   instead of the invalid `uvx mcp claude-replay` — unblocking directory
   auto-installers that reported "cannot be installed."
+- **Pinned `hatchling<1.30` in `[build-system]`** so the build emits
+  Metadata-2.4. Unpinned, CI picked up hatchling ≥1.30 which emits
+  Metadata-Version 2.5 — rejected by twine/PyPI, which failed the OIDC publish.
 
 ## [0.4.1] — 2026-08-08
 
