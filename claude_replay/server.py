@@ -23,7 +23,7 @@ from typing import Any
 import anyio
 from mcp.server import Server
 from mcp.server.sse import SseServerTransport
-from mcp.types import TextContent, Tool
+from mcp.types import TextContent, Tool, ToolAnnotations
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
@@ -133,11 +133,13 @@ async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="replay_status",
+            annotations=ToolAnnotations(title="Session status", readOnlyHint=True, openWorldHint=False),
             description="Current session summary: objective, status, checkpoint/event counts, last activity.",
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
             name="replay_checkpoint",
+            annotations=ToolAnnotations(title="Force checkpoint", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False),
             description="Force a checkpoint of the current session right now, with an optional note.",
             inputSchema={
                 "type": "object",
@@ -148,6 +150,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="replay_resume",
+            annotations=ToolAnnotations(title="Resume brief", readOnlyHint=True, openWorldHint=False),
             description=(
                 "Generate a structured resume brief for a session (default: the most recent). "
                 "Paste the result into a new Claude Code session to continue where it left off."
@@ -161,6 +164,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="replay_sessions",
+            annotations=ToolAnnotations(title="List sessions", readOnlyHint=True, openWorldHint=False),
             description="List recent sessions with status, model, duration, and checkpoint count.",
             inputSchema={
                 "type": "object",
@@ -171,6 +175,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="replay_export",
+            annotations=ToolAnnotations(title="Export session", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False),
             description="Render a session as a self-contained trace (html, json, or md) and return the output path.",
             inputSchema={
                 "type": "object",
@@ -183,6 +188,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="replay_search",
+            annotations=ToolAnnotations(title="Search sessions", readOnlyHint=True, openWorldHint=False),
             description=(
                 "Full-text search across recorded sessions (event payloads, objective, "
                 "name, and tags), with optional filters. Ranked by match count. Omit the "
@@ -203,6 +209,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="replay_tag",
+            annotations=ToolAnnotations(title="Name/tag session", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False),
             description=(
                 "Name or tag a session for later retrieval. Sets a name and/or adds/removes "
                 "tags on a session (default: the most recent)."
@@ -219,6 +226,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="replay_insights",
+            annotations=ToolAnnotations(title="Session insights", readOnlyHint=True, openWorldHint=False),
             description=(
                 "Per-session insight metrics: how it ended, duration, tool-call count, "
                 "error count/rate, files touched, and the most-used tools."
@@ -232,6 +240,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="replay_diff",
+            annotations=ToolAnnotations(title="Compare sessions", readOnlyHint=True, openWorldHint=False),
             description=(
                 "Compare two sessions side by side: metric deltas (tool calls, errors, "
                 "duration, files) and which files each touched."
@@ -247,6 +256,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="replay_stats",
+            annotations=ToolAnnotations(title="Cross-session stats", readOnlyHint=True, openWorldHint=False),
             description=(
                 "Cross-session analytics across all recorded sessions: total tool calls, "
                 "overall error rate, why sessions end (death-cause breakdown), the tool mix, "

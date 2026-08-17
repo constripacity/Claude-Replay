@@ -4,6 +4,19 @@ All notable changes to Claude Replay are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] — 2026-08-17
+
+Add MCP tool-behavior annotations. No functional change.
+
+### Added
+
+- All ten `replay_*` tools now declare MCP annotation hints (`readOnlyHint`,
+  `destructiveHint`, `idempotentHint`, `openWorldHint`, `title`). The read tools
+  (status, resume, sessions, search, insights, diff, stats) are read-only;
+  `replay_checkpoint` / `replay_export` / `replay_tag` are non-destructive writes
+  (export and tag idempotent); all are closed-world. Helps MCP clients and
+  directory scorers understand each tool before calling it.
+
 ## [0.4.2] — 2026-08-17
 
 Registry/packaging fix so `uvx` — and MCP directories (e.g. Glama) that
@@ -148,6 +161,7 @@ five MCP tools, a web dashboard, and a terminal UI read it back.
 - **MCP tools** — `replay_status`, `replay_checkpoint`, `replay_resume`,
   `replay_sessions`, `replay_export`.
 
+[0.4.3]: https://github.com/constripacity/Claude-Replay/releases/tag/v0.4.3
 [0.4.2]: https://github.com/constripacity/Claude-Replay/releases/tag/v0.4.2
 [0.4.1]: https://github.com/constripacity/Claude-Replay/releases/tag/v0.4.1
 [0.4.0]: https://github.com/constripacity/Claude-Replay/releases/tag/v0.4.0
