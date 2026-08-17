@@ -16,6 +16,8 @@ build
 *.db
 *.db-shm
 *.db-wal
+.env
+.env.*
 
 # Docs / vault / archives not needed at runtime.
 docs
